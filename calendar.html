@@ -1,4 +1,4 @@
-<!-- dynamic calendar with buttons to switch between weeks-->
+<!-- calendar for one doctor that loads the appointments from an sqlite database-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -24,10 +24,12 @@
         color: white; 
     }
     .appointment { 
-        padding: 2px 4px;
-        margin: 2px 0;
+        padding: 4px 6px;
+        margin: 3px 0;
+        background: #d9edf7;
         border-radius: 4px;
-        border-left: 4px solid #888; 
+        border-left: 4px solid #31708f; 
+        font-size: 14px;
     }
     #weekButtons {
         position: absolute;
@@ -47,33 +49,27 @@
 
 </head>
 <body>
-
-<h2 id="title"></h2>
+    
+<h2 id="title"></h2> 
 
 <div id="weekButtons">
     <button id="prevWeek">← Previous week</button>
-    <button id="nextWeek">Next week→</button>
+    <button id="nextWeek">Next week →</button>
 </div>
 
 <table id="calendarTable"></table>
 
-<script>
+<script type="module">
 
 // -------------------------------
-// doctor colours and appointments
+// Load appointments from database
 // -------------------------------
-const doctorColors = {
-    "Dr. Schmitt":  "hsl(120, 60%, 85%)",  // soft green
-    "Dr. Jonas":  "hsl(210, 70%, 85%)",  // soft blue
-    "Dr. Müller":   "hsl(30,  90%, 85%)",  // soft orange
-    "default":    "hsl(0,   0%, 90%)"    // grey as fallback
-};
-
-const appointments = [
-    { date: "2026-01-05", time: "09:00", text: "Dr. Schmitt" },
-    { date: "2026-01-05", time: "09:00", text: "Dr. Jonas" },
-    { date: "2026-01-07", time: "10:00", text: "Dr. Müller" }
-];
+let appointments = [];
+async function loadAppointments(startDate, endDate) {
+    const url = `/appointments?start=${startDate}&end=${endDate}`;
+    const res = await fetch(url);
+    appointments = await res.json() //date, time, patient, notes
+}
 
 // -------------------------------
 // URL parameters
@@ -139,7 +135,6 @@ for (let i = 0; i < 7; i++) {
 // -------------------------------
 // week switch buttons and page title
 // -------------------------------
-
 document.getElementById("prevWeek").onclick = () => {
     let newWeek = week - 1;
     let newYear = year;
@@ -166,6 +161,14 @@ document.getElementById("nextWeek").onclick = () => {
 document.getElementById("title").textContent =
     `Week ${week}, ${year} (${days[0].toDateString()} - ${days[6].toDateString()})`;
 
+
+// -------------------------------
+// load data for table
+// -------------------------------
+await loadAppointments(
+    days[0].toISOString().split("T")[0],
+    days[6].toISOString().split("T")[0]
+);
 
 // -------------------------------
 // render calendar table
@@ -198,10 +201,9 @@ for (let hour = startHour; hour < endHour; hour++) {
 
         let html = "";
         cellApps.forEach(a => {
-            const colour = doctorColors[a.text] || doctorColors["default"];
-
-            html += `<div class="appointment"style="background:${colour}; border-left-color:${colour.replace("85%", "65%")}">
-                ${a.text}
+            html += `<div class="appointment">
+                ${a.patient}
+                ${a.notes ? ("<small> — " + a.notes + "</small>") : ""}
                 </div>`;
         });
 
@@ -211,6 +213,7 @@ for (let hour = startHour; hour < endHour; hour++) {
     row += "</tr>";
     table.innerHTML += row;
 }
+
 </script>
 
 </body>
