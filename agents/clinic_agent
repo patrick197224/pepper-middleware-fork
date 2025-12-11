@@ -63,17 +63,12 @@ except Exception as e:
     AUDIO_MODULE_AVAILABLE = False
     get_user_text = None
 
-# ============================================================================
-# PEPPER ROBOT CONFIGURATION
-# ============================================================================
-
-PEPPER_MIDDLEWARE_URL = os.environ.get("PEPPER_MIDDLEWARE_URL", "http://172.30.36.71:5000")
+PEPPER_MIDDLEWARE_URL = os.environ.get("PEPPER_MIDDLEWARE_URL", "http://<ip_address>:5000")
 TTS_LANGUAGE = os.environ.get("TTS_LANGUAGE", "English")
 TTS_ANIMATED = True  # Use animated speech with gestures
 
 # Suppress ResourceWarnings from asyncio (they're harmless)
 warnings.filterwarnings("ignore", category=ResourceWarning)
-
 
 # ============================================================================
 # RAG SYSTEM INITIALIZATION
@@ -138,3 +133,10 @@ try:
         rag_qa_chain = create_retrieval_chain(vectorstore.as_retriever(), combine_docs_chain)
         print(f"✓ RAG system initialized with {len(documents)} document(s)")
         
+except ImportError as e:
+    print(f"Warning: Could not import LangChain modules: {e}")
+    print("RAG functionality will be disabled. Install with: pip install langchain-openai langchain-classic langchain-community langchain-core langchain-text-splitters chromadb PyPDF2")
+    rag_qa_chain = None
+except Exception as e:
+    print(f"Error initializing RAG system: {e}")
+    rag_qa_chain = None
