@@ -1,4 +1,4 @@
-<!-- calendar that dynamically calculates the dates in the table for a given week -->
+<!-- dynamic calendar with buttons to switch between weeks-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -7,10 +7,11 @@
 
 <style>
     body { 
-        font-family: Arial;
+        font-family: Arial; 
         margin: 20px; 
     }
-    table { width: 100%; 
+    table { 
+        width: 100%; 
         border-collapse: collapse; 
         table-layout: fixed; 
     }
@@ -28,12 +29,31 @@
         border-radius: 4px;
         border-left: 4px solid #888; 
     }
+    #weekButtons {
+        position: absolute;
+        top:20px;
+        right:20px;
+    }
+    #weekButtons button{
+        padding: 6px 12px;
+        margin-left: 8px;
+        font-size: 14px;
+        border-radius: 6px;
+        border: 1px solid #aaa;
+        background: #f2f2f2;
+        cursor: pointer;
+    }
 </style>
 
 </head>
 <body>
 
 <h2 id="title"></h2>
+
+<div id="weekButtons">
+    <button id="prevWeek">← Previous week</button>
+    <button id="nextWeek">Next week→</button>
+</div>
 
 <table id="calendarTable"></table>
 
@@ -79,9 +99,31 @@ function getMondayOfISOWeek(week, year) {
     return ISOweekStart;
 }
 
+function goToWeek(newWeek, newYear){
+    window.location.href =  `?year=${newYear}&week=${newWeek}`; //updates the url fitting for selected week
+}
+
+// to get last week of the year with the thursday of the last week
+function getISOWeeksInYear(year){
+    const lastThursday = new Date(Date.UTC(year,11,28));
+    return lastThursday.getWeekNumber();
+}
+
+// extension of the Date object to calculate the ISO calendar week (according to ISO the thursday of a week is relevant for which year it belongs to)
+Date.prototype.getWeekNumber = function(){
+    const date = new Date(Date.UTC(this.getFullYear(), this.getMonth(), this.getDate())); //copy of the date regarding timezone problems
+    const dayNum = date.getUTCDay() || 7;                                                 // gets weekday, changes sunday from 0 to 7
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);                                      // changes date to the thursday of same week
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));                    // creates date for first day of the year the thursday belongs to
+    return Math.ceil((((date - yearStart)/ 86400000) + 1) / 7);                           // rounds up for teh calculated week, +1 to prevent day 0 -> week 0
+};
+
 // -------------------------------
 // get week and year from URL
 // -------------------------------
+
+// read week selection from URL, e.g. "http://calendar_dynamic_with_buttons.html?year=2026&week=2"
+
 let year = parseInt(getQueryParam("year")) || 2026; 
 let week = parseInt(getQueryParam("week")) || 2; 
 const monday = getMondayOfISOWeek(week, year);
@@ -95,12 +137,39 @@ for (let i = 0; i < 7; i++) {
 }
 
 // -------------------------------
-// render calendar table
+// week switch buttons and page title
 // -------------------------------
 
-// header
+document.getElementById("prevWeek").onclick = () => {
+    let newWeek = week - 1;
+    let newYear = year;
+    // got to last week of previous year
+    if (newWeek < 1){
+        newYear--;        
+        newWeek = getISOWeeksInYear(newYear);
+    }
+    goToWeek(newWeek,newYear);
+};
+
+document.getElementById("nextWeek").onclick = () => {
+    let newWeek = week + 1;
+    let newYear = year;
+    // find number of weeks in current year
+    const weaksCurrentYear = getISOWeeksInYear(year);
+    if (newWeek > weaksCurrentYear){      
+        newWeek = 1;
+        newYear++;  
+    }
+    goToWeek(newWeek,newYear);
+};
+
 document.getElementById("title").textContent =
     `Week ${week}, ${year} (${days[0].toDateString()} - ${days[6].toDateString()})`;
+
+
+// -------------------------------
+// render calendar table
+// -------------------------------
 
 const startHour = 8;
 const endHour = 17;
