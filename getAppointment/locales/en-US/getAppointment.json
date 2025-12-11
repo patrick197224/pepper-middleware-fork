@@ -1,0 +1,8 @@
+{
+    "getAppointment": {
+        "connectionError": "Verbindungsfehler",
+        "dbpath": "appointments.db",
+        "text": "Text"
+        
+    }
+}
