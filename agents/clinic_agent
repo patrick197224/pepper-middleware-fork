@@ -352,3 +352,39 @@ def send_to_pepper_tablet(text: str) -> bool:
         import traceback
         traceback.print_exc()
         return False
+
+def get_recent_appointments(limit: int = 1, patient_name: Optional[str] = None) -> List[tuple]:
+    """
+    Get the most recent appointment(s) from the database.
+    
+    Args:
+        limit: Maximum number of appointments to return (default: 1)
+        patient_name: Optional patient name to filter by
+    
+    Returns:
+        List of appointment tuples: (id, date, time, patient, notes)
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if patient_name:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ?
+                    ORDER BY date DESC, time DESC
+                    LIMIT ?
+                """, (f"%{patient_name}%", limit))
+            else:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    ORDER BY date DESC, time DESC
+                    LIMIT ?
+                """, (limit,))
+            
+            return cursor.fetchall()
+    except Exception as e:
+        print(f"[DB] Error getting recent appointments: {e}")
+        return []
