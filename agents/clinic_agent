@@ -633,3 +633,161 @@ def create_appointment(patient_name: str, appointment_date: str, appointment_tim
         return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
     except Exception as e:
         return f"Error creating appointment: {str(e)}"
+
+@function_tool
+def check_availability(appointment_date: str, appointment_time: str, 
+                     doctor_name: Optional[str] = None) -> str:
+    """
+    Check if a time slot is available for booking.
+    
+    Args:
+        appointment_date: Date in format YYYY-MM-DD
+        appointment_time: Time in format HH:MM (24-hour format)
+        doctor_name: Doctor name to check (optional - if provided, checks for that specific doctor)
+    
+    Returns:
+        Availability status message
+    """
+    try:
+        # Validate date format
+        datetime.strptime(appointment_date, "%Y-%m-%d")
+        datetime.strptime(appointment_time, "%H:%M")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Remote schema doesn't have doctor_name or status, so check if time slot is taken
+            cursor.execute("""
+                SELECT id, patient, notes
+                FROM appointments
+                WHERE date = ? 
+                AND time = ?
+            """, (appointment_date, appointment_time))
+            
+            conflicts = cursor.fetchall()
+            
+            if conflicts:
+                conflict = conflicts[0]
+                # Try to extract doctor from notes if provided
+                doctor_info = ""
+                if conflict[2] and doctor_name:
+                    if doctor_name.lower() in conflict[2].lower():
+                        doctor_info = f" for {doctor_name}"
+                elif doctor_name:
+                    doctor_info = f" for {doctor_name}"
+                
+                return f"❌ Time slot {appointment_time} on {appointment_date} is NOT available{doctor_info}.\n" \
+                       f"Already booked: Appointment ID {conflict[0]}, Patient: {conflict[1]}"
+            
+        return f"✓ Time slot {appointment_time} on {appointment_date} is AVAILABLE" + \
+               (f" for {doctor_name}" if doctor_name else "")
+    except ValueError as e:
+        return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
+    except Exception as e:
+        return f"Error checking availability: {str(e)}"
+
+@function_tool
+def list_appointments(patient_name: Optional[str] = None, 
+                     appointment_date: Optional[str] = None) -> str:
+    """
+    List appointments from the database. Can filter by patient name or date.
+    
+    Args:
+        patient_name: Filter by patient name (optional)
+        appointment_date: Filter by date in format YYYY-MM-DD (optional)
+    
+    Returns:
+        Formatted list of appointments
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if patient_name and appointment_date:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ? AND date = ?
+                    ORDER BY date, time
+                """, (f"%{patient_name}%", appointment_date))
+            elif patient_name:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ?
+                    ORDER BY date, time
+                """, (f"%{patient_name}%",))
+            elif appointment_date:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE date = ?
+                    ORDER BY time
+                """, (appointment_date,))
+            else:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    ORDER BY date, time
+                """)
+            
+            appointments = cursor.fetchall()
+        
+        if not appointments:
+            return "No appointments found matching the criteria."
+        
+        result = f"Found {len(appointments)} appointment(s):\n\n"
+        for apt in appointments:
+            # Parse notes to extract reason, doctor, phone
+            notes = apt[4] or ""
+            reason = "Not specified"
+            doctor = "To be assigned"
+            
+            if notes:
+                # Try to parse notes format: "Reason: X | Doctor: Y | Phone: Z"
+                for part in notes.split("|"):
+                    part = part.strip()
+                    if part.startswith("Reason:"):
+                        reason = part.replace("Reason:", "").strip()
+                    elif part.startswith("Doctor:"):
+                        doctor = part.replace("Doctor:", "").strip()
+            
+            result += f"ID: {apt[0]}\n"
+            result += f"Patient: {apt[3]}\n"
+            result += f"Date: {apt[1]}\n"
+            result += f"Time: {apt[2]}\n"
+            result += f"Reason: {reason}\n"
+            result += f"Doctor: {doctor}\n"
+            result += "-" * 40 + "\n"
+        
+        return result
+    except Exception as e:
+        return f"Error listing appointments: {str(e)}"
+
+@function_tool
+def cancel_appointment(appointment_id: int) -> str:
+    """
+    Cancel an appointment by ID.
+    
+    Args:
+        appointment_id: The ID of the appointment to cancel
+    
+    Returns:
+        Confirmation message
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Remote schema doesn't have status field, so delete the appointment
+            cursor.execute("""
+                DELETE FROM appointments 
+                WHERE id = ?
+            """, (appointment_id,))
+            
+            if cursor.rowcount == 0:
+                return f"Appointment ID {appointment_id} not found."
+            
+            conn.commit()
+            return f"✓ Appointment ID {appointment_id} has been cancelled."
+    except Exception as e:
+        return f"Error cancelling appointment: {str(e)}"
