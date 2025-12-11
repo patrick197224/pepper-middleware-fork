@@ -541,3 +541,95 @@ def normalize_doctor_name(doctor_name: Optional[str]) -> Optional[str]:
     # Remove 'Dr.' prefix and extra spaces, convert to lowercase for comparison
     normalized = doctor_name.replace('Dr.', '').replace('dr.', '').strip()
     return normalized
+
+
+@function_tool
+def create_appointment(patient_name: str, appointment_date: str, appointment_time: str, 
+                      reason: Optional[str] = None, doctor_name: Optional[str] = None,
+                      patient_phone: Optional[str] = None) -> str:
+    """
+    Create a new appointment in the database.
+    Checks for conflicts to prevent double-booking.
+    
+    Args:
+        patient_name: Full name of the patient
+        appointment_date: Date in format YYYY-MM-DD
+        appointment_time: Time in format HH:MM (24-hour format)
+        reason: Reason for the appointment (optional)
+        doctor_name: Preferred doctor name (optional)
+        patient_phone: Patient's phone number (optional)
+    
+    Returns:
+        Confirmation message with appointment details, or error if conflict exists
+    """
+    try:
+        # Validate date format
+        datetime.strptime(appointment_date, "%Y-%m-%d")
+        datetime.strptime(appointment_time, "%H:%M")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check for conflicts - remote schema doesn't have doctor_name or status
+            # So we check if the time slot is already taken
+            cursor.execute("""
+                SELECT id, patient
+                FROM appointments
+                WHERE date = ? 
+                AND time = ?
+            """, (appointment_date, appointment_time))
+            
+            conflicting_appointments = cursor.fetchall()
+            
+            if conflicting_appointments:
+                conflict = conflicting_appointments[0]
+                return f"❌ Appointment conflict detected!\n" \
+                       f"The time slot {appointment_time} on {appointment_date} is already booked " \
+                       f"(Appointment ID: {conflict[0]}, Patient: {conflict[1]}).\n" \
+                       f"Please choose a different time."
+            
+            # Also check if the same patient already has an appointment at this exact time
+            cursor.execute("""
+                SELECT id, date, time
+                FROM appointments
+                WHERE patient = ?
+                AND date = ?
+                AND time = ?
+            """, (patient_name, appointment_date, appointment_time))
+            
+            existing_patient_appt = cursor.fetchone()
+            if existing_patient_appt:
+                return f"❌ You already have an appointment scheduled for {appointment_time} on {appointment_date} " \
+                       f"(Appointment ID: {existing_patient_appt[0]}).\n" \
+                       f"Please choose a different time."
+            
+            # Build notes field - include reason, doctor, and phone if provided
+            notes_parts = []
+            if reason:
+                notes_parts.append(f"Reason: {reason}")
+            if doctor_name:
+                notes_parts.append(f"Doctor: {doctor_name}")
+            if patient_phone:
+                notes_parts.append(f"Phone: {patient_phone}")
+            notes = " | ".join(notes_parts) if notes_parts else None
+            
+            # No conflicts, proceed with insertion using remote schema
+            cursor.execute("""
+                INSERT INTO appointments (date, time, patient, notes)
+                VALUES (?, ?, ?, ?)
+            """, (appointment_date, appointment_time, patient_name, notes))
+            appointment_id = cursor.lastrowid
+            conn.commit()
+        
+        return f"✓ Appointment created successfully!\n" \
+               f"Appointment ID: {appointment_id}\n" \
+               f"Patient: {patient_name}\n" \
+               f"Date: {appointment_date}\n" \
+               f"Time: {appointment_time}\n" \
+               f"Reason: {reason or 'Not specified'}\n" \
+               f"Doctor: {doctor_name or 'To be assigned'}\n" \
+               f"Status: Scheduled"
+    except ValueError as e:
+        return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
+    except Exception as e:
+        return f"Error creating appointment: {str(e)}"
