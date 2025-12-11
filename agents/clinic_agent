@@ -506,3 +506,38 @@ def extract_summary_from_response(response: str, user_input: str) -> Optional[st
                     return sentence[:100]  # Limit length
     
     return None
+
+# ============================================================================
+# FUNCTION TOOLS
+# ============================================================================
+
+@function_tool
+def query_clinic_info(question: str) -> str:
+    """
+    Query the clinic's knowledge base for information about services, staff, procedures, etc.
+    Use this tool when patients ask questions about the clinic, services, staff, or procedures.
+    
+    Args:
+        question: The patient's question about the clinic
+    
+    Returns:
+        Answer based on the clinic's documentation
+    """
+    if rag_qa_chain is None:
+        return "Sorry, the clinic information system is not available. Please contact the clinic directly."
+    
+    try:
+        result = rag_qa_chain.invoke({"input": question})
+        return result.get('answer', 'I could not find information about that in the clinic documentation.')
+    except Exception as e:
+        return f"Error querying clinic information: {str(e)}"
+
+def normalize_doctor_name(doctor_name: Optional[str]) -> Optional[str]:
+    """
+    Normalize doctor name to handle variations like 'Dr. Emily Carter' vs 'Emily Carter'
+    """
+    if not doctor_name:
+        return None
+    # Remove 'Dr.' prefix and extra spaces, convert to lowercase for comparison
+    normalized = doctor_name.replace('Dr.', '').replace('dr.', '').strip()
+    return normalized
