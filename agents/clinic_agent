@@ -265,3 +265,90 @@ def init_appointments_db():
 
 # Initialize database on import
 init_appointments_db()
+
+# ============================================================================
+# PEPPER ROBOT TTS FUNCTIONS
+# ============================================================================
+
+def send_to_pepper_tts(text: str, language: str = None, animated: bool = None) -> bool:
+    """
+    Send text to Pepper robot's text-to-speech system.
+    
+    Args:
+        text: The text for Pepper to speak
+        language: Language for TTS (default: TTS_LANGUAGE)
+        animated: Whether to use animated speech (default: TTS_ANIMATED)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if language is None:
+        language = TTS_LANGUAGE
+    if animated is None:
+        animated = TTS_ANIMATED
+    
+    try:
+        url = f"{PEPPER_MIDDLEWARE_URL}/robot/tts/say"
+        payload = {
+            "text": text,
+            "language": language,
+            "isAnimated": animated
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"[TTS] Successfully sent to Pepper: {text[:50]}...")
+            return True
+        else:
+            print(f"[TTS] Error sending to Pepper: {response.status_code}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"[TTS] Connection error: {e}")
+        return False
+
+def send_to_pepper_tablet(text: str) -> bool:
+    """
+    Send text summary to Pepper robot's tablet display.
+    
+    The tablet template expects an iterable (list), and the endpoint uses literal_eval()
+    on the URL parameter. We need to format the text as a Python list literal string.
+    
+    Args:
+        text: The text summary to display on the tablet
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # The tablet template loops over text with {% for key in text %}, so it expects a list
+        # The endpoint uses literal_eval() on the URL parameter, so we need a valid Python literal
+        # Split by | if present, otherwise use the whole text as a single item
+        if " | " in text:
+            # Split by | and create a list, using repr() for proper escaping
+            items = [item.strip() for item in text.split("|")]
+            # Format as Python list literal string using repr() for each item
+            text_literal = "[" + ", ".join([repr(item) for item in items]) + "]"
+        else:
+            # Single item, wrap in list using repr() for proper escaping
+            text_literal = f"[{repr(text)}]"
+        
+        url = f"{PEPPER_MIDDLEWARE_URL}/robot/tablet/text"
+        payload = {"text": text_literal}
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"[Tablet] Successfully sent summary to Pepper tablet: {text[:50]}...")
+            return True
+        else:
+            print(f"[Tablet] Error sending to Pepper tablet: {response.status_code}")
+            if response.text:
+                print(f"[Tablet] Response: {response.text[:200]}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"[Tablet] Connection error: {e}")
+        return False
+    except Exception as e:
+        print(f"[Tablet] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
