@@ -35,6 +35,23 @@ def clear_tablet():
 
     return Response(status=200)
 
+@socketio.on("/robot/tablet/website")
+@app.route("/robot/tablet/website", methods=["POST"])
+@log("/robot/tablet/website")
+def show_website(url = None):
+    if not url:
+        url = request.get_json(force=True, silent=True)["url"]
+    
+    result = tablet.loadUrl(url, _async=True)
+    
+    if not result:
+        logger.warning("Website {} is not reachable.".format(url))
+        return Response(status=500)
+    
+    tablet.showWebview()
+    
+    return Response(status=200)
+
 @socketio.on("/robot/tablet/text")
 @app.route("/robot/tablet/text", methods=["POST"])
 @log("/robot/tablet/text")
