@@ -1,0 +1,148 @@
+<!-- calendar that dynamically calculates the dates in the table for a given week -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Weekly Calendar</title>
+
+<style>
+    body { 
+        font-family: Arial;
+        margin: 20px; 
+    }
+    table { width: 100%; 
+        border-collapse: collapse; 
+        table-layout: fixed; 
+    }
+    th, td { 
+        border: 1px solid #ccc; 
+        padding: 6px; 
+    }
+    th { 
+        background: #4CAF50; 
+        color: white; 
+    }
+    .appointment { 
+        padding: 2px 4px;
+        margin: 2px 0;
+        border-radius: 4px;
+        border-left: 4px solid #888; 
+    }
+</style>
+
+</head>
+<body>
+
+<h2 id="title"></h2>
+
+<table id="calendarTable"></table>
+
+<script>
+
+// -------------------------------
+// doctor colours and appointments
+// -------------------------------
+const doctorColors = {
+    "Dr. Schmitt":  "hsl(120, 60%, 85%)",  // soft green
+    "Dr. Jonas":  "hsl(210, 70%, 85%)",  // soft blue
+    "Dr. Müller":   "hsl(30,  90%, 85%)",  // soft orange
+    "default":    "hsl(0,   0%, 90%)"    // grey as fallback
+};
+
+const appointments = [
+    { date: "2026-01-05", time: "09:00", text: "Dr. Schmitt" },
+    { date: "2026-01-05", time: "09:00", text: "Dr. Jonas" },
+    { date: "2026-01-07", time: "10:00", text: "Dr. Müller" }
+];
+
+// -------------------------------
+// URL parameters
+// -------------------------------
+function getQueryParam(name) {
+    const url = new URL(window.location.href);
+    return url.searchParams.get(name);
+}
+
+// -------------------------------
+// week calculation
+// -------------------------------
+
+// Convert year + week number → Monday date
+function getMondayOfISOWeek(week, year) {
+    const simple = new Date(year, 0, 1 + (week - 1) * 7);
+    const dow = simple.getDay();
+    const ISOweekStart = simple;
+    if (dow <= 4)
+        ISOweekStart.setDate(simple.getDate() - simple.getDay() + 1);
+    else
+        ISOweekStart.setDate(simple.getDate() + 8 - simple.getDay());
+    return ISOweekStart;
+}
+
+// -------------------------------
+// get week and year from URL
+// -------------------------------
+let year = parseInt(getQueryParam("year")) || 2026; 
+let week = parseInt(getQueryParam("week")) || 2; 
+const monday = getMondayOfISOWeek(week, year);
+
+// build list of 7 days in this week
+const days = [];
+for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(d);
+}
+
+// -------------------------------
+// render calendar table
+// -------------------------------
+
+// header
+document.getElementById("title").textContent =
+    `Week ${week}, ${year} (${days[0].toDateString()} - ${days[6].toDateString()})`;
+
+const startHour = 8;
+const endHour = 17;
+const table = document.getElementById("calendarTable");
+
+// header row
+let headerRow = "<tr><th>Time</th>";
+days.forEach(d => {
+    const label = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+    const isoDate = d.toISOString().split("T")[0];
+    headerRow += `<th data-date="${isoDate}">${label}</th>`;
+});
+headerRow += "</tr>";
+table.innerHTML = headerRow;
+
+// timeslots
+for (let hour = startHour; hour < endHour; hour++) {
+    let row = `<tr><th>${hour}:00</th>`;
+
+    days.forEach(d => {
+        const isoDate = d.toISOString().split("T")[0];
+        const timeString = String(hour).padStart(2, "0") + ":00"; // pads hour times to two digits if necessary
+        const cellApps = appointments.filter(a =>
+            a.date === isoDate && a.time === timeString
+        );
+
+        let html = "";
+        cellApps.forEach(a => {
+            const colour = doctorColors[a.text] || doctorColors["default"];
+
+            html += `<div class="appointment"style="background:${colour}; border-left-color:${colour.replace("85%", "65%")}">
+                ${a.text}
+                </div>`;
+        });
+
+        row += `<td>${html}</td>`;
+    });
+
+    row += "</tr>";
+    table.innerHTML += row;
+}
+</script>
+
+</body>
+</html>
