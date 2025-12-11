@@ -63,6 +63,10 @@ except Exception as e:
     AUDIO_MODULE_AVAILABLE = False
     get_user_text = None
 
+# ============================================================================
+# PEPPER ROBOT CONFIGURATION
+# ============================================================================
+
 PEPPER_MIDDLEWARE_URL = os.environ.get("PEPPER_MIDDLEWARE_URL", "http://<ip_address>:5000")
 TTS_LANGUAGE = os.environ.get("TTS_LANGUAGE", "English")
 TTS_ANIMATED = True  # Use animated speech with gestures
@@ -140,3 +144,124 @@ except ImportError as e:
 except Exception as e:
     print(f"Error initializing RAG system: {e}")
     rag_qa_chain = None
+
+# ============================================================================
+# APPOINTMENT DATABASE - REMOTE CONFIGURATION
+# ============================================================================
+
+# Remote database configuration
+REMOTE_DB_HOST = os.environ.get("REMOTE_DB_HOST", "172.30.36.71")
+REMOTE_DB_USER = os.environ.get("REMOTE_DB_USER", "hcr")
+REMOTE_DB_PASSWORD = os.environ.get("REMOTE_DB_PASSWORD", "daslaborausglas7")
+REMOTE_DB_PATH = os.environ.get("REMOTE_DB_PATH", "~/server/appointments.db")
+USE_REMOTE_DB = os.environ.get("USE_REMOTE_DB", "true").lower() == "true"
+
+# Local database path (fallback or for testing)
+APPOINTMENTS_DB = "appointments.db"
+
+# ============================================================================
+# REMOTE DATABASE ACCESS HELPER
+# ============================================================================
+
+@contextmanager
+def get_db_connection():
+    """
+    Context manager that provides a database connection.
+    If USE_REMOTE_DB is True, it downloads the remote database, works with it locally,
+    then uploads it back. Otherwise, it uses the local database.
+    """
+    if USE_REMOTE_DB:
+        # Remote database mode - download, work locally, upload back
+        local_db_path = None
+        ssh = None
+        sftp = None
+        
+        try:
+            # Expand ~ in remote path
+            remote_db_path = REMOTE_DB_PATH.replace('~', '/home/' + REMOTE_DB_USER)
+            
+            # Create temporary local file
+            temp_fd, local_db_path = tempfile.mkstemp(suffix='.db', prefix='appointments_')
+            os.close(temp_fd)
+            
+            # Connect via SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Try password authentication first, then key-based
+            try:
+                if REMOTE_DB_PASSWORD:
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, password=REMOTE_DB_PASSWORD, timeout=10)
+                else:
+                    # Try using default SSH key locations
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, timeout=10)
+            except paramiko.AuthenticationException:
+                # Try with key file
+                key_path = os.path.expanduser("~/.ssh/id_rsa")
+                if os.path.exists(key_path):
+                    private_key = paramiko.RSAKey.from_private_key_file(key_path)
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, pkey=private_key, timeout=10)
+                else:
+                    raise Exception(f"Could not authenticate to {REMOTE_DB_USER}@{REMOTE_DB_HOST}. "
+                                  f"Set REMOTE_DB_PASSWORD environment variable or configure SSH keys.")
+            
+            sftp = ssh.open_sftp()
+            
+            # Download remote database if it exists
+            try:
+                sftp.get(remote_db_path, local_db_path)
+                print(f"[DB] Downloaded remote database from {REMOTE_DB_HOST}:{remote_db_path}")
+            except FileNotFoundError:
+                print(f"[DB] Remote database not found, creating new one at {remote_db_path}")
+                # Create empty database file locally
+                conn = sqlite3.connect(local_db_path)
+                conn.close()
+            
+            # Work with local database
+            conn = sqlite3.connect(local_db_path)
+            try:
+                yield conn
+            finally:
+                conn.close()
+            
+            # Upload back to remote server
+            sftp.put(local_db_path, remote_db_path)
+            print(f"[DB] Uploaded database back to {REMOTE_DB_HOST}:{remote_db_path}")
+            
+        except Exception as e:
+            print(f"[DB] Error accessing remote database: {e}")
+            raise
+        finally:
+            # Cleanup
+            if sftp:
+                sftp.close()
+            if ssh:
+                ssh.close()
+            if local_db_path and os.path.exists(local_db_path):
+                os.remove(local_db_path)
+    else:
+        # Local database mode
+        conn = sqlite3.connect(APPOINTMENTS_DB)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+def init_appointments_db():
+    """Initialize the appointments database with the remote schema"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Use the remote schema: id, date, time, patient, notes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS appointments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                patient TEXT NOT NULL,
+                notes TEXT
+            )
+        """)
+        conn.commit()
+
+# Initialize database on import
+init_appointments_db()
