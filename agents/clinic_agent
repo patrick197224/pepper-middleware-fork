@@ -388,3 +388,121 @@ def get_recent_appointments(limit: int = 1, patient_name: Optional[str] = None) 
     except Exception as e:
         print(f"[DB] Error getting recent appointments: {e}")
         return []
+
+def extract_summary_from_response(response: str, user_input: str) -> Optional[str]:
+    """
+    Extract a concise summary from the agent response for tablet display.
+    Uses database queries for appointment data instead of text parsing for robustness.
+    
+    Args:
+        response: The full agent response
+        user_input: The user's original input (for context)
+    
+    Returns:
+        Summary string for tablet display, or None if no summary needed
+    """
+    response_lower = response.lower()
+    user_input_lower = user_input.lower()
+    
+    # Check for appointment-related keywords
+    appointment_keywords = ['appointment', 'scheduled', 'booked', 'cancelled', 'successfully', 'created', 'confirmed']
+    if any(keyword in response_lower for keyword in appointment_keywords):
+        # Try to extract patient name from user input for filtering
+        patient_name = None
+        name_patterns = [
+            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b',  # "Mike Miller"
+            r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',  # "for Mike Miller"
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, user_input + " " + response)
+            if match:
+                candidate = match.group(1)
+                # Filter out common false positives
+                if candidate.lower() not in ['doctor', 'dr', 'appointment', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']:
+                    patient_name = candidate
+                    break
+        
+        # Query database for the most recent appointment(s)
+        appointments = get_recent_appointments(limit=1, patient_name=patient_name)
+        
+        if appointments:
+            apt = appointments[0]
+            apt_id, apt_date, apt_time, apt_patient, apt_notes = apt
+            
+            # Parse notes to extract reason and doctor
+            reason = "Not specified"
+            doctor = "To be assigned"
+            if apt_notes:
+                for part in apt_notes.split("|"):
+                    part = part.strip()
+                    if part.startswith("Reason:"):
+                        reason = part.replace("Reason:", "").strip()
+                    elif part.startswith("Doctor:"):
+                        doctor = part.replace("Doctor:", "").strip()
+            
+            # Format date nicely
+            try:
+                date_obj = datetime.strptime(apt_date, "%Y-%m-%d")
+                formatted_date = date_obj.strftime("%B %d, %Y")
+            except:
+                formatted_date = apt_date
+            
+            # Format time nicely
+            try:
+                time_obj = datetime.strptime(apt_time, "%H:%M")
+                formatted_time = time_obj.strftime("%I:%M %p").lstrip("0")
+            except:
+                formatted_time = apt_time
+            
+            # Build summary from database data
+            summary_parts = []
+            summary_parts.append(f"Patient: {apt_patient}")
+            summary_parts.append(f"Date: {formatted_date}")
+            summary_parts.append(f"Time: {formatted_time}")
+            if doctor and doctor != "To be assigned":
+                summary_parts.append(f"Doctor: {doctor}")
+            if reason and reason != "Not specified":
+                summary_parts.append(f"Reason: {reason}")
+            
+            return " | ".join(summary_parts)
+        else:
+            # No appointments found in database, but response suggests one was created
+            # This might be a timing issue, return a generic confirmation
+            return "Appointment Confirmed"
+    
+    # Extract clinic information (simplified summary)
+    elif any(keyword in user_input_lower for keyword in ['hours', 'open', 'closed', 'when', 'what time', 'service']):
+        # Extract key info about hours/services
+        if 'hour' in response_lower or 'open' in response_lower:
+            # Try to extract hours information
+            hours_match = re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*(?:to|until|-)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?', response, re.IGNORECASE)
+            if hours_match:
+                return f"Hours: {hours_match.group(0)}"
+            # Try to extract day ranges
+            days_match = re.search(r'(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?:\s+through|\s+to|-)?\s*(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?', response, re.IGNORECASE)
+            if days_match:
+                return f"Open: {days_match.group(0)}"
+    
+    # For list appointments - query database for count
+    elif 'found' in response_lower and 'appointment' in response_lower:
+        try:
+            appointments = get_recent_appointments(limit=100)  # Get all to count
+            count = len(appointments)
+            if count > 0:
+                return f"Found {count} appointment(s)"
+        except:
+            pass
+    
+    # For other informative responses, create a very short summary (first sentence or key phrase)
+    elif len(response) > 80:
+        # Take first meaningful sentence (but skip greetings)
+        sentences = re.split(r'[.!?]+', response)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            # Skip very short sentences or greetings
+            if len(sentence) > 30 and len(sentence) < 120:
+                # Skip common greeting phrases
+                if not any(phrase in sentence.lower() for phrase in ['hello', 'hi', 'thank you', 'how can i help']):
+                    return sentence[:100]  # Limit length
+    
+    return None
