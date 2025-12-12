@@ -1,0 +1,31 @@
+# Ignore Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.Python
+
+# Ignore downloaded models (large files)
+models/*.caffemodel
+models/*.weights
+models/yolov3.cfg
+models/yolov3.weights
+models/MobileNetSSD_deploy.caffemodel
+
+# Keep the download script
+!models/download_models.sh
+
+# Ignore OpenCV cache
+.opencv/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
