@@ -19,7 +19,7 @@ def init_database():
         columns = [row[1] for row in cursor.fetchall()]
         required_columns = {'id', 'date', 'time', 'patient', 'notes'}
         if not required_columns.issubset(set(columns)):
-            # Table exists but has wrong schema - drop and recreate
+            # Table exists but has wrong schema, drop and recreate
             cursor.execute("DROP TABLE appointments")
             conn.commit()
     
@@ -43,12 +43,66 @@ def get_database():
     conn.row_factory = sqlite3.Row # rows become hybrid of tuple and dcitionary, access via name and index
     return conn
 
-# makes filepath not necessary anymore for access in browser
+
+
+# homepage with two buttons to route to either patient or employee view
 @app.get("/")
-def index():
+def home():
+    """Homepage of the robot receptionist."""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Appointment Calendar</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding-top: 60px;
+            }
+            h1 {
+                margin-bottom: 40px;
+            }
+            a.button {
+                display: inline-block;
+                padding: 15px 30px;
+                margin: 15px;
+                font-size: 20px;
+                color: white;
+                background: #4CAF50;
+                border-radius: 8px;
+                text-decoration: none;
+            }
+            a.button:hover {
+                background: #45a049;
+            }
+            a.secondary {
+                background: #2196F3;
+            }
+            a.secondary:hover {
+                background: #1E88E5;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Select Calendar View</h1>
+        <a class="button secondary" href="/patient">Patient View</a>
+        <a class="button" href="/employee">Employee View</a>
+    </body>
+    </html>
+    """
+
+@app.get("/employee")
+def employee_calendar():
     return send_from_directory("static", "calendar_employee.html")
 
+@app.get("/patient")
+def patient_calendar():
+    return send_from_directory("static", "calendar_patient.html")
+
+
 #returns all appointments in a given date range
+
 @app.get("/appointments")
 def list_appointments():
 
@@ -72,6 +126,8 @@ def list_appointments():
     conn.close()
     return jsonify(rows)
 
+
+
 if __name__ == "__main__":
     init_database()
-    app.run(host="0.0.0.0",port=5001, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)
