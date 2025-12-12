@@ -1,0 +1,130 @@
+<!-- calendar for employees to view appointments but also be able to edit or delete them-->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Clinic Appointments</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 20px; 
+        }
+        table { 
+            border-collapse: collapse; 
+            width: 100%;
+            margin-top: 20px; 
+            }
+        td, th { 
+            border: 1px solid #ccc; 
+            padding: 8px; 
+        }
+        th { 
+            background: #eee; 
+        }
+        input { 
+            padding: 5px; 
+            margin: 3px; 
+        }
+        button { 
+            padding: 6px 10px; 
+        }
+    </style>
+</head>
+<body>
+
+<h1>Appointments</h1>
+
+<h3>Create Appointment</h3>
+<div>
+    <input id="new_date" type="date">
+    <input id="new_time" type="time">
+    <input id="new_patient" type="text" placeholder="Patient">
+    <input id="new_notes" type="text" placeholder="Notes">
+    <button onclick="createAppointment()">Add</button>
+</div>
+
+<table id="apptTable">
+    <thead>
+        <tr>
+            <th>Date</th><th>Time</th><th>Patient</th><th>Notes</th><th>Actions</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<script>
+// load all appointments from server
+async function loadAppointments() {
+    const res = await fetch("/appointments");
+    const appointments = await res.json();
+
+    const tbody = document.querySelector("#apptTable tbody");
+    tbody.innerHTML = "";
+
+    // create table rows for each appointment
+    appointments.forEach(appt => {
+        const row = document.createElement("tr");
+
+        // editable fields for each appointment
+        row.innerHTML = `
+            <td><input value="${appt.date}" id="date_${appt.id}"></td>
+            <td><input value="${appt.time}" id="time_${appt.id}"></td>
+            <td><input value="${appt.patient}" id="patient_${appt.id}"></td>
+            <td><input value="${appt.notes || ""}" id="notes_${appt.id}"></td>
+            <td>
+                <button onclick="updateAppointment(${appt.id})">Save</button>
+                <button onclick="deleteAppointment(${appt.id})">Delete</button>
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    });
+}
+
+// send new appointment to server
+async function createAppointment() {
+    const data = {
+        date: document.getElementById("new_date").value,
+        time: document.getElementById("new_time").value,
+        patient: document.getElementById("new_patient").value,
+        notes: document.getElementById("new_notes").value
+    };
+
+    await fetch("/appointments", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+    });
+
+    loadAppointments();
+}
+
+// update an existing appointment
+async function updateAppointment(id) {
+    const data = {
+        date: document.getElementById(`date_${id}`).value,
+        time: document.getElementById(`time_${id}`).value,
+        patient: document.getElementById(`patient_${id}`).value,
+        notes: document.getElementById(`notes_${id}`).value
+    };
+
+    await fetch(`/appointments/${id}`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+    });
+
+    loadAppointments();
+}
+
+// delete an appointment
+async function deleteAppointment(id) {
+    await fetch(`/appointments/${id}`, { method: "DELETE" });
+    loadAppointments();
+}
+
+loadAppointments();
+</script>
+
+</body>
+</html>
