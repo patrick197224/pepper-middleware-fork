@@ -1,0 +1,136 @@
+[
+    {
+        "id": "human_detection_example",
+        "type": "tab",
+        "label": "Human Detection Example",
+        "disabled": false,
+        "info": "Example flow demonstrating the Human Detection node for Pepper Bot"
+    },
+    {
+        "id": "inject_trigger",
+        "type": "inject",
+        "z": "human_detection_example",
+        "name": "Start Detection",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 130,
+        "y": 100,
+        "wires": [
+            [
+                "human_detect"
+            ]
+        ]
+    },
+    {
+        "id": "human_detect",
+        "type": "Human Detection",
+        "z": "human_detection_example",
+        "name": "Detect Humans",
+        "method": "mobilenet",
+        "confidence": 50,
+        "timeout": 30,
+        "camera": "0",
+        "visualFeedback": true,
+        "x": 340,
+        "y": 100,
+        "wires": [
+            [
+                "success_debug",
+                "success_msg"
+            ],
+            [
+                "timeout_debug"
+            ]
+        ]
+    },
+    {
+        "id": "success_debug",
+        "type": "debug",
+        "z": "human_detection_example",
+        "name": "Detection Success",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 580,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "timeout_debug",
+        "type": "debug",
+        "z": "human_detection_example",
+        "name": "Timeout",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 550,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "success_msg",
+        "type": "function",
+        "z": "human_detection_example",
+        "name": "Format Message",
+        "func": "const count = msg.payload.count;\nconst humans = msg.payload.humans;\n\nlet message = `Detected ${count} human(s):\\n`;\nhumans.forEach((human, i) => {\n    message += `\\nHuman ${i+1}:`;\n    message += `\\n  Position: (${human.bbox.x}, ${human.bbox.y})`;\n    message += `\\n  Size: ${human.bbox.width}x${human.bbox.height}`;\n    message += `\\n  Confidence: ${(human.confidence * 100).toFixed(1)}%`;\n});\n\nmsg.payload = message;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 120,
+        "wires": [
+            [
+                "display_msg"
+            ]
+        ]
+    },
+    {
+        "id": "display_msg",
+        "type": "debug",
+        "z": "human_detection_example",
+        "name": "Human Info",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 770,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "comment1",
+        "type": "comment",
+        "z": "human_detection_example",
+        "name": "Human Detection Test Flow",
+        "info": "This flow demonstrates:\n1. Trigger detection with Inject node\n2. Process video with Human Detection\n3. View results in Debug panel\n\nConfiguration:\n- Method: MobileNet SSD (balanced)\n- Confidence: 50%\n- Timeout: 30 seconds\n- Camera: Default webcam (0)\n- Visual Feedback: Enabled\n\nOutputs:\n- Output 1: Detection success with human data\n- Output 2: Timeout if no humans found",
+        "x": 160,
+        "y": 40,
+        "wires": []
+    }
+]

@@ -1,0 +1,414 @@
+[
+    {
+        "id": "test_flow_tab",
+        "type": "tab",
+        "label": "Human Detection Tests",
+        "disabled": false,
+        "info": "Comprehensive test flows for Human Detection node"
+    },
+    {
+        "id": "test1_inject",
+        "type": "inject",
+        "z": "test_flow_tab",
+        "name": "Test 1: Basic Detection (HOG)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 80,
+        "wires": [
+            [
+                "test1_detect"
+            ]
+        ]
+    },
+    {
+        "id": "test1_detect",
+        "type": "Human Detection",
+        "z": "test_flow_tab",
+        "name": "HOG Detection",
+        "method": "hog",
+        "confidence": 50,
+        "timeout": 10,
+        "camera": "0",
+        "visualFeedback": true,
+        "detectEmotion": false,
+        "x": 420,
+        "y": 80,
+        "wires": [
+            [
+                "test1_success"
+            ],
+            [
+                "test1_timeout"
+            ]
+        ]
+    },
+    {
+        "id": "test1_success",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "✓ Detection Success",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.count",
+        "statusType": "auto",
+        "x": 660,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "test1_timeout",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "⊘ Timeout",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 640,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "test2_inject",
+        "type": "inject",
+        "z": "test_flow_tab",
+        "name": "Test 2: With Emotions",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 180,
+        "wires": [
+            [
+                "test2_detect"
+            ]
+        ]
+    },
+    {
+        "id": "test2_detect",
+        "type": "Human Detection",
+        "z": "test_flow_tab",
+        "name": "Emotion Detection",
+        "method": "hog",
+        "confidence": 50,
+        "timeout": 10,
+        "camera": "0",
+        "visualFeedback": true,
+        "detectEmotion": true,
+        "x": 420,
+        "y": 180,
+        "wires": [
+            [
+                "test2_success"
+            ],
+            [
+                "test2_timeout"
+            ]
+        ]
+    },
+    {
+        "id": "test2_success",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "✓ With Emotions",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.humans[0].emotion.label",
+        "statusType": "jsonata",
+        "x": 660,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "test2_timeout",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "⊘ Timeout",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 640,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "test3_inject",
+        "type": "inject",
+        "z": "test_flow_tab",
+        "name": "Test 3: Timeout Test",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 280,
+        "wires": [
+            [
+                "test3_detect"
+            ]
+        ]
+    },
+    {
+        "id": "test3_detect",
+        "type": "Human Detection",
+        "z": "test_flow_tab",
+        "name": "5 Second Timeout",
+        "method": "hog",
+        "confidence": 50,
+        "timeout": 5,
+        "camera": "0",
+        "visualFeedback": false,
+        "detectEmotion": false,
+        "x": 420,
+        "y": 280,
+        "wires": [
+            [
+                "test3_success"
+            ],
+            [
+                "test3_timeout"
+            ]
+        ]
+    },
+    {
+        "id": "test3_success",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "✓ Detected",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 650,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "test3_timeout",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "✓ Timeout Triggered",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 670,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "test4_inject",
+        "type": "inject",
+        "z": "test_flow_tab",
+        "name": "Test 4: MobileNet (if models available)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 220,
+        "y": 380,
+        "wires": [
+            [
+                "test4_detect"
+            ]
+        ]
+    },
+    {
+        "id": "test4_detect",
+        "type": "Human Detection",
+        "z": "test_flow_tab",
+        "name": "MobileNet Detection",
+        "method": "mobilenet",
+        "confidence": 60,
+        "timeout": 10,
+        "camera": "0",
+        "visualFeedback": true,
+        "detectEmotion": false,
+        "x": 440,
+        "y": 380,
+        "wires": [
+            [
+                "test4_success"
+            ],
+            [
+                "test4_error"
+            ]
+        ]
+    },
+    {
+        "id": "test4_success",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "✓ MobileNet Works",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 680,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "test4_error",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "⚠ Models Missing",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 670,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "test5_inject",
+        "type": "inject",
+        "z": "test_flow_tab",
+        "name": "Test 5: Rapid Triggers",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 480,
+        "wires": [
+            [
+                "test5_detect"
+            ]
+        ]
+    },
+    {
+        "id": "test5_detect",
+        "type": "Human Detection",
+        "z": "test_flow_tab",
+        "name": "Rapid Test",
+        "method": "hog",
+        "confidence": 50,
+        "timeout": 2,
+        "camera": "0",
+        "visualFeedback": false,
+        "detectEmotion": false,
+        "x": 410,
+        "y": 480,
+        "wires": [
+            [
+                "test5_counter"
+            ],
+            [
+                "test5_counter"
+            ]
+        ]
+    },
+    {
+        "id": "test5_counter",
+        "type": "function",
+        "z": "test_flow_tab",
+        "name": "Count Results",
+        "func": "context.count = (context.count || 0) + 1;\nnode.status({fill: \"blue\", shape: \"dot\", text: `Count: ${context.count}`});\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 480,
+        "wires": [
+            [
+                "test5_debug"
+            ]
+        ]
+    },
+    {
+        "id": "test5_debug",
+        "type": "debug",
+        "z": "test_flow_tab",
+        "name": "Results",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 820,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "comment1",
+        "type": "comment",
+        "z": "test_flow_tab",
+        "name": "Test Suite Instructions",
+        "info": "# Human Detection Test Suite\n\n## How to Use\n\n1. **Deploy** this flow\n2. **Run tests** by clicking inject buttons\n3. **Check debug panel** for results\n\n## Test Cases\n\n### Test 1: Basic Detection\n- Uses HOG method (fastest)\n- 10 second timeout\n- Stand in front of camera and click inject\n- Expected: Detection on output 1\n\n### Test 2: Emotion Detection\n- Enables emotion recognition\n- Requires DeepFace installed\n- Expected: Detection with emotion data\n\n### Test 3: Timeout Handling\n- 5 second timeout\n- Don't stand in front of camera\n- Expected: Timeout message on output 2\n\n### Test 4: MobileNet\n- Tests MobileNet SSD method\n- Requires model files downloaded\n- Expected: Detection or error if models missing\n\n### Test 5: Rapid Triggers\n- Tests process cleanup\n- Triggers every 1 second\n- Expected: No memory leaks, clean restarts\n\n## Success Criteria\n\n✓ All tests complete without errors\n✓ Proper output routing (success vs timeout)\n✓ Clean process management\n✓ Accurate detection results",
+        "x": 170,
+        "y": 20,
+        "wires": []
+    }
+]

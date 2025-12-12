@@ -1,0 +1,30 @@
+{
+  "name": "node-red-contrib-human-detection",
+  "version": "1.0.0",
+  "description": "Human detection and emotion recognition for Node-RED and Pepper Robot",
+  "main": "humanDetection.js",
+  "keywords": [
+    "node-red",
+    "human-detection",
+    "opencv",
+    "pepper-robot",
+    "emotion-recognition",
+    "computer-vision"
+  ],
+  "node-red": {
+    "nodes": {
+      "human-detection": "humanDetection.js"
+    }
+  },
+  "author": "Siddharth Patni",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab-fi.ostfalia.de/id547815/clinic_agent.git"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Run: python3 detect_human.py --method hog --camera 0\""
+  }
+}

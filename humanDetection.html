@@ -1,0 +1,101 @@
+<script type="text/javascript">
+    RED.nodes.registerType("Human Detection", {
+        category: "Pepper",
+        color: "#D8BFD8",
+        defaults: {
+            method: {
+                value: "mobilenet",
+                required: true
+            },
+            confidence: {
+                value: 50,
+                required: true,
+                validate: RED.validators.number()
+            },
+            timeout: {
+                value: 0,
+                validate: RED.validators.number()
+            },
+            camera: {
+                value: "0"
+            },
+            visualFeedback: {
+                value: true
+            },
+            detectEmotion: {
+                value: false
+            }
+        },
+        inputs: 1,
+        outputs: 2,
+        icon: "font-awesome/fa-user",
+        label: function () {
+            const node = this;
+            return node._("humanDetection.label") + " (" + node.method + ")";
+        },
+        paletteLabel: "Human Detection"
+    });
+</script>
+
+<script type="text/html" data-template-name="Human Detection">
+    <div class="form-row">
+        <label for="node-input-method"><i class="fa fa-cog"></i> <span data-i18n="humanDetection.method"></span>:</label>
+        <select id="node-input-method">
+            <option value="hog">HOG (Fast, CPU-friendly)</option>
+            <option value="mobilenet">MobileNet SSD (Balanced)</option>
+            <option value="yolo">YOLO (Most Accurate)</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-confidence"><i class="fa fa-percent"></i> <span data-i18n="humanDetection.confidence"></span>:</label>
+        <input type="number" id="node-input-confidence" min="0" max="100" placeholder="50">
+        <span style="margin-left: 5px;">%</span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-timeout"><i class="fa fa-clock-o"></i> <span data-i18n="humanDetection.timeout"></span>:</label>
+        <input type="number" id="node-input-timeout" min="0" placeholder="0">
+        <span style="margin-left: 5px;" data-i18n="humanDetection.seconds"></span>
+        <br><span style="margin-left: 30px; font-size: 0.9em; color: #666;" data-i18n="humanDetection.timeoutHint"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-camera"><i class="fa fa-camera"></i> <span data-i18n="humanDetection.camera"></span>:</label>
+        <input type="text" id="node-input-camera" placeholder="0">
+        <br><span style="margin-left: 30px; font-size: 0.9em; color: #666;" data-i18n="humanDetection.cameraHint"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-visualFeedback"><i class="fa fa-eye"></i> <span data-i18n="humanDetection.visualFeedback"></span>:</label>
+        <input type="checkbox" id="node-input-visualFeedback" style="width: auto; margin-left: 5px;">
+    </div>
+    <div class="form-row">
+        <label for="node-input-detectEmotion"><i class="fa fa-smile-o"></i> <span data-i18n="humanDetection.detectEmotion"></span>:</label>
+        <input type="checkbox" id="node-input-detectEmotion" style="width: auto; margin-left: 5px;">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="Human Detection">
+    <p>Detects humans using Python and OpenCV.</p>
+    <h3>Outputs</h3>
+    <ol class="node-ports">
+        <li>Success Output
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt>
+                <dd>Contains detection results: count, humans array with bounding boxes and confidence scores</dd>
+            </dl>
+        </li>
+        <li>Timeout Output
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">string</span></dt>
+                <dd>Timeout message if no humans detected within timeout period</dd>
+            </dl>
+        </li>
+    </ol>
+    <h3>Details</h3>
+    <p>This node uses Python with OpenCV to detect humans in real-time video.</p>
+    <p><b>Detection Methods:</b></p>
+    <ul>
+        <li><b>HOG:</b> Histogram of Oriented Gradients - Fast, CPU-friendly, good for simple scenarios</li>
+        <li><b>MobileNet SSD:</b> Deep learning model - Balanced performance and accuracy</li>
+        <li><b>YOLO:</b> You Only Look Once - Most accurate but requires more resources</li>
+    </ul>
+    <p><b>Setup:</b> Requires Python with opencv-python installed. See README for installation instructions.</p>
+</script>

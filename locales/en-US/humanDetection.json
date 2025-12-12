@@ -1,0 +1,19 @@
+{
+    "humanDetection": {
+        "label": "Human Detection",
+        "method": "Detection Method",
+        "confidence": "Confidence Threshold",
+        "timeout": "Timeout",
+        "seconds": "seconds",
+        "timeoutHint": "(0 = no timeout)",
+        "camera": "Camera Source",
+        "cameraHint": "0 for default webcam, or Pepper camera ID",
+        "visualFeedback": "Visual Feedback",
+        "detectEmotion": "Detect Emotions",
+        "detecting": "Detecting...",
+        "ready": "Ready",
+        "detected": "Detected",
+        "error": "Error",
+        "timeoutOutput": "No humans detected (timeout)"
+    }
+}
