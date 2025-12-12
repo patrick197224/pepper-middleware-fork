@@ -1,0 +1,87 @@
+GreenOak Family Practice – Services Overview
+
+GreenOak Family Practice is a community-focused general practice clinic located in Wolfenbuttel, Germany. The practice provides first-contact, continuous, and coordinated primary care for patients of all ages, with an emphasis on preventive medicine, chronic disease management, and patient education.
+
+Practice identity and staff
+GreenOak Family Practice is owned and led by Dr. Emily Carter (General Practitioner, MD, board-certified in Family Medicine). The core clinical team consists of:
+- Dr. Emily Carter – General Practitioner, clinical lead for chronic disease and elderly care.
+- Dr. Michael Nguyen – General Practitioner, focus on acute care and minor procedures.
+- Sarah Thompson, RN – Registered nurse, responsible for vaccinations, wound care, and triage.
+- Daniel Rossi, PA-C – Physician assistant, focus on follow-up visits and chronic disease monitoring.
+- Linda Perez – Practice manager, responsible for scheduling, billing, and administrative workflows.
+- James Miller – Front desk coordinator, responsible for patient check-in and communication.
+- Anna Schmidt – Medical assistant, supports clinicians with vital signs, ECG, spirometry, and lab samples.
+
+Work time
+- Monday: 08am to 05pm
+- Tuseday: 08am to 05pm
+- Wednesday: 08am to 05pm
+- Thursday: 08am to 05pm
+- Friday: 08am to 05pm
+
+Normal consultation services
+The practice offers scheduled and same-day appointments for common primary care needs. Typical reasons for a standard consultation include:
+- Evaluation of acute complaints such as cough, sore throat, fever, urinary symptoms, back pain, minor skin rashes, and headaches.
+- Management of chronic conditions such as hypertension, type 2 diabetes, hyperlipidemia, asthma, chronic obstructive pulmonary disease (COPD), hypothyroidism, and mild to moderate depression and anxiety.
+- Medication reviews, repeat prescriptions, and treatment plan adjustments for stable chronic diseases.
+- Work and school absence notes, fitness-to-work assessments, and basic medical forms that do not require specialist evaluation.
+
+A normal consultation is usually scheduled for 15 minutes with a general practitioner or 20 minutes for complex chronic care review. Follow-up consultations for stable chronic disease are often booked with the physician assistant under the supervision of a general practitioner.
+
+Preventive care and screening services
+GreenOak Family Practice provides preventive health services aligned with national primary care guidelines. These services include:
+- Annual health checks for adults, including blood pressure measurement, body mass index (BMI), basic blood tests (lipid profile, glucose or HbA1c when indicated), and lifestyle counseling on diet, exercise, smoking cessation, and alcohol use.
+- Childhood vaccination program according to the national immunization schedule, administered by the nurse, with documentation in the patient’s electronic health record.
+- Adult vaccinations such as influenza vaccine, pneumococcal vaccine for at-risk patients, tetanus booster, and travel vaccinations when appropriate.
+- Cancer screening coordination, including reminders and referrals for cervical cancer screening (Pap smears), breast cancer screening (mammography), and colorectal cancer screening (stool tests or colonoscopy referral) as recommended by age and risk factors.
+- Cardiovascular risk assessment for patients with multiple risk factors, including smoking, obesity, family history of early cardiovascular disease, and existing metabolic conditions.
+
+Chronic disease management services
+The practice maintains structured management plans for patients with chronic conditions. Key chronic disease services include:
+- Hypertension management with regular blood pressure monitoring, medication titration, and lifestyle interventions, typically reviewed every 3–6 months.
+- Type 2 diabetes management including HbA1c monitoring, annual foot examination, blood pressure and lipid control, and coordination of eye examinations and nephropathy screening.
+- Asthma and COPD care with spirometry, inhaler technique education, written action plans, and annual review visits.
+- Weight management and metabolic syndrome programs, including individualized lifestyle plans and periodic follow-up appointments.
+- Stable mental health conditions such as mild to moderate depression and anxiety, including prescription of first-line medications, brief counseling, and referral to psychological services when necessary.
+
+Nursing and procedural services
+Under the supervision of the general practitioners, the nursing and clinical support staff provide a range of routine procedures. Normal services include:
+- Blood sample collection for routine laboratory tests requested by the clinicians.
+- Vaccination administration and documentation for children and adults.
+- Wound care, including dressing changes for minor injuries and postoperative wounds.
+- Ear irrigation for impacted earwax when clinically indicated.
+- Electrocardiograms (ECG) for cardiovascular evaluation ordered by a general practitioner.
+- Spirometry testing to support diagnosis and monitoring of asthma and COPD.
+- Basic point-of-care testing, such as capillary blood glucose and urine dipstick analysis.
+
+Administrative and coordination services
+GreenOak Family Practice offers standard administrative support and care coordination services as part of normal operations. These include:
+- Electronic prescription renewal and transmission to community pharmacies, subject to clinical review.
+- Generation of brief medical summaries, medication lists, and referral letters to specialists and hospitals when indicated.
+- Coordination of diagnostic imaging and specialist appointments based on clinical assessment.
+- Management of sick notes and basic forms required by employers, schools, and insurance providers, when supported by clinical documentation.
+- Telephone and secure electronic messaging for simple follow-up questions, clarification of test results, and medication-related inquiries.
+
+Access and appointment types
+The practice schedules appointments through telephone and an online booking system managed by the practice manager and front desk coordinator. Normal access patterns are:
+- Same-day or next-day appointments for acute, non-emergency issues, primarily with the on-duty general practitioner or physician assistant.
+- Planned follow-up visits for chronic disease management, usually scheduled weeks or months in advance.
+- Annual preventive care visits for eligible patients, often combined with blood tests taken several days prior to the physician review.
+- Short nurse-only appointments for vaccinations, blood pressure checks, blood tests, and simple wound care.
+
+Scope and limitations of services
+GreenOak Family Practice is a generalist clinic and does not provide emergency medicine, advanced imaging, or surgical procedures. Normal practice policies include:
+- Immediate referral to emergency services for life-threatening symptoms such as chest pain suggestive of myocardial infarction, severe shortness of breath, or stroke symptoms.
+- Referral to specialist care for complex or unstable conditions beyond the general practitioner’s scope, such as suspected cancer, complex autoimmune disease, or severe psychiatric illness.
+- No provision of long-term opioid management for chronic non-cancer pain without specialist involvement.
+- No performance of major surgical procedures, obstetric deliveries, or inpatient care; these are referred to hospital-based services.
+
+Quality and data documentation practices
+The practice uses an electronic health record (EHR) system to document all encounters, diagnoses, medications, lab results, and referrals. Typical data elements recorded during routine visits include:
+- Patient demographics, reason for encounter, and symptom description.
+- Vital signs such as blood pressure, heart rate, temperature, weight, and BMI.
+- Diagnoses coded according to standard primary care classification systems.
+- Medications with dose, frequency, indication, and start or modification date.
+- Planned follow-up interval and any pending tests or referrals.
+
+GreenOak Family Practice periodically reviews key performance indicators such as patient satisfaction feedback, average waiting time for routine appointments, vaccination coverage for children in the practice, and adherence to chronic disease follow-up intervals. These metrics are used internally to improve accessibility, continuity of care, and clinical outcomes.

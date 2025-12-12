@@ -1,0 +1,1354 @@
+#!/usr/bin/env python3
+"""
+Multi-Agent System for Clinic Patient Communication
+
+This script implements a multi-agent system using OpenAI Agents Framework to provide
+patient communication, clinic information retrieval, and appointment management.
+
+The system consists of:
+1. The Orchestrator: Automatically routes patient requests to the appropriate agent
+2. The Receptionist: Answers questions about the clinic using RAG system
+3. The Appointment Manager: Handles appointment scheduling and database operations
+
+Required packages:
+pip install langchain-openai langchain-classic langchain-community langchain-core langchain-text-splitters chromadb PyPDF2 pandas
+"""
+
+import os
+import warnings
+import sqlite3
+import requests
+import tempfile
+import paramiko
+import re
+from typing import Dict, Optional, List
+from datetime import datetime, timedelta
+from contextlib import contextmanager
+from agents import Agent, Runner, function_tool, SQLiteSession
+
+
+# Import Pepper audio module
+try:
+    import sys
+    import importlib.util
+    # Handle module name with dash - get the directory of this file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    pepper_audio_path = os.path.join(current_dir, "pepper-audio.py")
+    spec = importlib.util.spec_from_file_location("pepper_audio", pepper_audio_path)
+    pepper_audio = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pepper_audio)
+    speech_to_text_from_pepper = pepper_audio.speech_to_text_from_pepper
+    speech_to_text_interactive = pepper_audio.speech_to_text_interactive
+    PEPPER_AUDIO_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Could not load pepper-audio module: {e}")
+    print("Install required packages: pip install paramiko openai")
+    PEPPER_AUDIO_AVAILABLE = False
+    speech_to_text_from_pepper = None
+    speech_to_text_interactive = None
+
+# Import audio.py module for get_user_text()
+try:
+    import sys
+    import importlib.util
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    audio_path = os.path.join(current_dir, "audio.py")
+    spec = importlib.util.spec_from_file_location("audio_module", audio_path)
+    audio_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audio_module)
+    get_user_text = audio_module.get_user_text
+    AUDIO_MODULE_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Could not load audio module: {e}")
+    AUDIO_MODULE_AVAILABLE = False
+    get_user_text = None
+
+# ============================================================================
+# PEPPER ROBOT CONFIGURATION
+# ============================================================================
+
+PEPPER_MIDDLEWARE_URL = os.environ.get("PEPPER_MIDDLEWARE_URL", "http://<ip_address>:5000")
+TTS_LANGUAGE = os.environ.get("TTS_LANGUAGE", "English")
+TTS_ANIMATED = True  # Use animated speech with gestures
+
+# Suppress ResourceWarnings from asyncio (they're harmless)
+warnings.filterwarnings("ignore", category=ResourceWarning)
+
+# ============================================================================
+# RAG SYSTEM INITIALIZATION
+# ============================================================================
+
+print("Initializing RAG system for clinic information...")
+
+try:
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from langchain_classic.chains.retrieval import create_retrieval_chain
+    from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_community.vectorstores import Chroma
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    import glob
+    import PyPDF2
+    
+    # Load documents
+    documents = []
+    for filename in glob.glob("*.txt"):
+        with open(filename, "r", encoding="utf-8") as f:
+            documents.append(f.read())
+    
+    for filename in glob.glob("*.pdf"):
+        try:
+            with open(filename, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+                documents.append(pdf_text)
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    
+    if not documents:
+        print("Warning: No documents found. RAG system will not work properly.")
+        rag_qa_chain = None
+    else:
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.create_documents(documents)
+        
+        embeddings = OpenAIEmbeddings(
+            openai_api_key=os.environ["OPENAI_API_KEY"],
+            model="text-embedding-ada-002"
+        )
+        vectorstore = Chroma.from_documents(docs, embeddings)
+        
+        llm = ChatOpenAI(
+            openai_api_key=os.environ["OPENAI_API_KEY"],
+            model_name="gpt-3.5-turbo"
+        )
+        
+        system_prompt = (
+            "Use the following context about GreenOak Family Practice clinic to answer the question. "
+            "If the information is not in the context, say so. Be helpful and accurate.\n\n"
+            "{context}"
+        )
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{input}")
+        ])
+        
+        combine_docs_chain = create_stuff_documents_chain(llm, prompt)
+        rag_qa_chain = create_retrieval_chain(vectorstore.as_retriever(), combine_docs_chain)
+        print(f"✓ RAG system initialized with {len(documents)} document(s)")
+        
+except ImportError as e:
+    print(f"Warning: Could not import LangChain modules: {e}")
+    print("RAG functionality will be disabled. Install with: pip install langchain-openai langchain-classic langchain-community langchain-core langchain-text-splitters chromadb PyPDF2")
+    rag_qa_chain = None
+except Exception as e:
+    print(f"Error initializing RAG system: {e}")
+    rag_qa_chain = None
+
+# ============================================================================
+# APPOINTMENT DATABASE - REMOTE CONFIGURATION
+# ============================================================================
+
+# Remote database configuration
+REMOTE_DB_HOST = os.environ.get("REMOTE_DB_HOST", "172.30.36.71")
+REMOTE_DB_USER = os.environ.get("REMOTE_DB_USER", "hcr")
+REMOTE_DB_PASSWORD = os.environ.get("REMOTE_DB_PASSWORD", "daslaborausglas7")
+REMOTE_DB_PATH = os.environ.get("REMOTE_DB_PATH", "~/server/appointments.db")
+USE_REMOTE_DB = os.environ.get("USE_REMOTE_DB", "true").lower() == "true"
+
+# Local database path (fallback or for testing)
+APPOINTMENTS_DB = "appointments.db"
+
+# ============================================================================
+# REMOTE DATABASE ACCESS HELPER
+# ============================================================================
+
+@contextmanager
+def get_db_connection():
+    """
+    Context manager that provides a database connection.
+    If USE_REMOTE_DB is True, it downloads the remote database, works with it locally,
+    then uploads it back. Otherwise, it uses the local database.
+    """
+    if USE_REMOTE_DB:
+        # Remote database mode - download, work locally, upload back
+        local_db_path = None
+        ssh = None
+        sftp = None
+        
+        try:
+            # Expand ~ in remote path
+            remote_db_path = REMOTE_DB_PATH.replace('~', '/home/' + REMOTE_DB_USER)
+            
+            # Create temporary local file
+            temp_fd, local_db_path = tempfile.mkstemp(suffix='.db', prefix='appointments_')
+            os.close(temp_fd)
+            
+            # Connect via SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Try password authentication first, then key-based
+            try:
+                if REMOTE_DB_PASSWORD:
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, password=REMOTE_DB_PASSWORD, timeout=10)
+                else:
+                    # Try using default SSH key locations
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, timeout=10)
+            except paramiko.AuthenticationException:
+                # Try with key file
+                key_path = os.path.expanduser("~/.ssh/id_rsa")
+                if os.path.exists(key_path):
+                    private_key = paramiko.RSAKey.from_private_key_file(key_path)
+                    ssh.connect(REMOTE_DB_HOST, username=REMOTE_DB_USER, pkey=private_key, timeout=10)
+                else:
+                    raise Exception(f"Could not authenticate to {REMOTE_DB_USER}@{REMOTE_DB_HOST}. "
+                                  f"Set REMOTE_DB_PASSWORD environment variable or configure SSH keys.")
+            
+            sftp = ssh.open_sftp()
+            
+            # Download remote database if it exists
+            try:
+                sftp.get(remote_db_path, local_db_path)
+                print(f"[DB] Downloaded remote database from {REMOTE_DB_HOST}:{remote_db_path}")
+            except FileNotFoundError:
+                print(f"[DB] Remote database not found, creating new one at {remote_db_path}")
+                # Create empty database file locally
+                conn = sqlite3.connect(local_db_path)
+                conn.close()
+            
+            # Work with local database
+            conn = sqlite3.connect(local_db_path)
+            try:
+                yield conn
+            finally:
+                conn.close()
+            
+            # Upload back to remote server
+            sftp.put(local_db_path, remote_db_path)
+            print(f"[DB] Uploaded database back to {REMOTE_DB_HOST}:{remote_db_path}")
+            
+        except Exception as e:
+            print(f"[DB] Error accessing remote database: {e}")
+            raise
+        finally:
+            # Cleanup
+            if sftp:
+                sftp.close()
+            if ssh:
+                ssh.close()
+            if local_db_path and os.path.exists(local_db_path):
+                os.remove(local_db_path)
+    else:
+        # Local database mode
+        conn = sqlite3.connect(APPOINTMENTS_DB)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+def init_appointments_db():
+    """Initialize the appointments database with the remote schema"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Use the remote schema: id, date, time, patient, notes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS appointments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                patient TEXT NOT NULL,
+                notes TEXT
+            )
+        """)
+        conn.commit()
+
+# Initialize database on import
+init_appointments_db()
+
+# ============================================================================
+# PEPPER ROBOT TTS FUNCTIONS
+# ============================================================================
+
+def send_to_pepper_tts(text: str, language: str = None, animated: bool = None) -> bool:
+    """
+    Send text to Pepper robot's text-to-speech system.
+    
+    Args:
+        text: The text for Pepper to speak
+        language: Language for TTS (default: TTS_LANGUAGE)
+        animated: Whether to use animated speech (default: TTS_ANIMATED)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if language is None:
+        language = TTS_LANGUAGE
+    if animated is None:
+        animated = TTS_ANIMATED
+    
+    try:
+        url = f"{PEPPER_MIDDLEWARE_URL}/robot/tts/say"
+        payload = {
+            "text": text,
+            "language": language,
+            "isAnimated": animated
+        }
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"[TTS] Successfully sent to Pepper: {text[:50]}...")
+            return True
+        else:
+            print(f"[TTS] Error sending to Pepper: {response.status_code}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"[TTS] Connection error: {e}")
+        return False
+
+def send_to_pepper_tablet(text: str) -> bool:
+    """
+    Send text summary to Pepper robot's tablet display.
+    
+    The tablet template expects an iterable (list), and the endpoint uses literal_eval()
+    on the URL parameter. We need to format the text as a Python list literal string.
+    
+    Args:
+        text: The text summary to display on the tablet
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # The tablet template loops over text with {% for key in text %}, so it expects a list
+        # The endpoint uses literal_eval() on the URL parameter, so we need a valid Python literal
+        # Split by | if present, otherwise use the whole text as a single item
+        if " | " in text:
+            # Split by | and create a list, using repr() for proper escaping
+            items = [item.strip() for item in text.split("|")]
+            # Format as Python list literal string using repr() for each item
+            text_literal = "[" + ", ".join([repr(item) for item in items]) + "]"
+        else:
+            # Single item, wrap in list using repr() for proper escaping
+            text_literal = f"[{repr(text)}]"
+        
+        url = f"{PEPPER_MIDDLEWARE_URL}/robot/tablet/text"
+        payload = {"text": text_literal}
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"[Tablet] Successfully sent summary to Pepper tablet: {text[:50]}...")
+            return True
+        else:
+            print(f"[Tablet] Error sending to Pepper tablet: {response.status_code}")
+            if response.text:
+                print(f"[Tablet] Response: {response.text[:200]}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"[Tablet] Connection error: {e}")
+        return False
+    except Exception as e:
+        print(f"[Tablet] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def get_recent_appointments(limit: int = 1, patient_name: Optional[str] = None) -> List[tuple]:
+    """
+    Get the most recent appointment(s) from the database.
+    
+    Args:
+        limit: Maximum number of appointments to return (default: 1)
+        patient_name: Optional patient name to filter by
+    
+    Returns:
+        List of appointment tuples: (id, date, time, patient, notes)
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if patient_name:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ?
+                    ORDER BY date DESC, time DESC
+                    LIMIT ?
+                """, (f"%{patient_name}%", limit))
+            else:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    ORDER BY date DESC, time DESC
+                    LIMIT ?
+                """, (limit,))
+            
+            return cursor.fetchall()
+    except Exception as e:
+        print(f"[DB] Error getting recent appointments: {e}")
+        return []
+
+def extract_summary_from_response(response: str, user_input: str) -> Optional[str]:
+    """
+    Extract a concise summary from the agent response for tablet display.
+    Uses database queries for appointment data instead of text parsing for robustness.
+    
+    Args:
+        response: The full agent response
+        user_input: The user's original input (for context)
+    
+    Returns:
+        Summary string for tablet display, or None if no summary needed
+    """
+    response_lower = response.lower()
+    user_input_lower = user_input.lower()
+    
+    # Check for appointment-related keywords
+    appointment_keywords = ['appointment', 'scheduled', 'booked', 'cancelled', 'successfully', 'created', 'confirmed']
+    if any(keyword in response_lower for keyword in appointment_keywords):
+        # Try to extract patient name from user input for filtering
+        patient_name = None
+        name_patterns = [
+            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b',  # "Mike Miller"
+            r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',  # "for Mike Miller"
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, user_input + " " + response)
+            if match:
+                candidate = match.group(1)
+                # Filter out common false positives
+                if candidate.lower() not in ['doctor', 'dr', 'appointment', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']:
+                    patient_name = candidate
+                    break
+        
+        # Query database for the most recent appointment(s)
+        appointments = get_recent_appointments(limit=1, patient_name=patient_name)
+        
+        if appointments:
+            apt = appointments[0]
+            apt_id, apt_date, apt_time, apt_patient, apt_notes = apt
+            
+            # Parse notes to extract reason and doctor
+            reason = "Not specified"
+            doctor = "To be assigned"
+            if apt_notes:
+                for part in apt_notes.split("|"):
+                    part = part.strip()
+                    if part.startswith("Reason:"):
+                        reason = part.replace("Reason:", "").strip()
+                    elif part.startswith("Doctor:"):
+                        doctor = part.replace("Doctor:", "").strip()
+            
+            # Format date nicely
+            try:
+                date_obj = datetime.strptime(apt_date, "%Y-%m-%d")
+                formatted_date = date_obj.strftime("%B %d, %Y")
+            except:
+                formatted_date = apt_date
+            
+            # Format time nicely
+            try:
+                time_obj = datetime.strptime(apt_time, "%H:%M")
+                formatted_time = time_obj.strftime("%I:%M %p").lstrip("0")
+            except:
+                formatted_time = apt_time
+            
+            # Build summary from database data
+            summary_parts = []
+            summary_parts.append(f"Patient: {apt_patient}")
+            summary_parts.append(f"Date: {formatted_date}")
+            summary_parts.append(f"Time: {formatted_time}")
+            if doctor and doctor != "To be assigned":
+                summary_parts.append(f"Doctor: {doctor}")
+            if reason and reason != "Not specified":
+                summary_parts.append(f"Reason: {reason}")
+            
+            return " | ".join(summary_parts)
+        else:
+            # No appointments found in database, but response suggests one was created
+            # This might be a timing issue, return a generic confirmation
+            return "Appointment Confirmed"
+    
+    # Extract clinic information (simplified summary)
+    elif any(keyword in user_input_lower for keyword in ['hours', 'open', 'closed', 'when', 'what time', 'service']):
+        # Extract key info about hours/services
+        if 'hour' in response_lower or 'open' in response_lower:
+            # Try to extract hours information
+            hours_match = re.search(r'\b\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*(?:to|until|-)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?', response, re.IGNORECASE)
+            if hours_match:
+                return f"Hours: {hours_match.group(0)}"
+            # Try to extract day ranges
+            days_match = re.search(r'(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?:\s+through|\s+to|-)?\s*(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?', response, re.IGNORECASE)
+            if days_match:
+                return f"Open: {days_match.group(0)}"
+    
+    # For list appointments - query database for count
+    elif 'found' in response_lower and 'appointment' in response_lower:
+        try:
+            appointments = get_recent_appointments(limit=100)  # Get all to count
+            count = len(appointments)
+            if count > 0:
+                return f"Found {count} appointment(s)"
+        except:
+            pass
+    
+    # For other informative responses, create a very short summary (first sentence or key phrase)
+    elif len(response) > 80:
+        # Take first meaningful sentence (but skip greetings)
+        sentences = re.split(r'[.!?]+', response)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            # Skip very short sentences or greetings
+            if len(sentence) > 30 and len(sentence) < 120:
+                # Skip common greeting phrases
+                if not any(phrase in sentence.lower() for phrase in ['hello', 'hi', 'thank you', 'how can i help']):
+                    return sentence[:100]  # Limit length
+    
+    return None
+
+# ============================================================================
+# FUNCTION TOOLS
+# ============================================================================
+
+@function_tool
+def query_clinic_info(question: str) -> str:
+    """
+    Query the clinic's knowledge base for information about services, staff, procedures, etc.
+    Use this tool when patients ask questions about the clinic, services, staff, or procedures.
+    
+    Args:
+        question: The patient's question about the clinic
+    
+    Returns:
+        Answer based on the clinic's documentation
+    """
+    if rag_qa_chain is None:
+        return "Sorry, the clinic information system is not available. Please contact the clinic directly."
+    
+    try:
+        result = rag_qa_chain.invoke({"input": question})
+        return result.get('answer', 'I could not find information about that in the clinic documentation.')
+    except Exception as e:
+        return f"Error querying clinic information: {str(e)}"
+
+def normalize_doctor_name(doctor_name: Optional[str]) -> Optional[str]:
+    """
+    Normalize doctor name to handle variations like 'Dr. Emily Carter' vs 'Emily Carter'
+    """
+    if not doctor_name:
+        return None
+    # Remove 'Dr.' prefix and extra spaces, convert to lowercase for comparison
+    normalized = doctor_name.replace('Dr.', '').replace('dr.', '').strip()
+    return normalized
+
+
+@function_tool
+def create_appointment(patient_name: str, appointment_date: str, appointment_time: str, 
+                      reason: Optional[str] = None, doctor_name: Optional[str] = None,
+                      patient_phone: Optional[str] = None) -> str:
+    """
+    Create a new appointment in the database.
+    Checks for conflicts to prevent double-booking.
+    
+    Args:
+        patient_name: Full name of the patient
+        appointment_date: Date in format YYYY-MM-DD
+        appointment_time: Time in format HH:MM (24-hour format)
+        reason: Reason for the appointment (optional)
+        doctor_name: Preferred doctor name (optional)
+        patient_phone: Patient's phone number (optional)
+    
+    Returns:
+        Confirmation message with appointment details, or error if conflict exists
+    """
+    try:
+        # Validate date format
+        datetime.strptime(appointment_date, "%Y-%m-%d")
+        datetime.strptime(appointment_time, "%H:%M")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check for conflicts - remote schema doesn't have doctor_name or status
+            # So we check if the time slot is already taken
+            cursor.execute("""
+                SELECT id, patient
+                FROM appointments
+                WHERE date = ? 
+                AND time = ?
+            """, (appointment_date, appointment_time))
+            
+            conflicting_appointments = cursor.fetchall()
+            
+            if conflicting_appointments:
+                conflict = conflicting_appointments[0]
+                return f"❌ Appointment conflict detected!\n" \
+                       f"The time slot {appointment_time} on {appointment_date} is already booked " \
+                       f"(Appointment ID: {conflict[0]}, Patient: {conflict[1]}).\n" \
+                       f"Please choose a different time."
+            
+            # Also check if the same patient already has an appointment at this exact time
+            cursor.execute("""
+                SELECT id, date, time
+                FROM appointments
+                WHERE patient = ?
+                AND date = ?
+                AND time = ?
+            """, (patient_name, appointment_date, appointment_time))
+            
+            existing_patient_appt = cursor.fetchone()
+            if existing_patient_appt:
+                return f"❌ You already have an appointment scheduled for {appointment_time} on {appointment_date} " \
+                       f"(Appointment ID: {existing_patient_appt[0]}).\n" \
+                       f"Please choose a different time."
+            
+            # Build notes field - include reason, doctor, and phone if provided
+            notes_parts = []
+            if reason:
+                notes_parts.append(f"Reason: {reason}")
+            if doctor_name:
+                notes_parts.append(f"Doctor: {doctor_name}")
+            if patient_phone:
+                notes_parts.append(f"Phone: {patient_phone}")
+            notes = " | ".join(notes_parts) if notes_parts else None
+            
+            # No conflicts, proceed with insertion using remote schema
+            cursor.execute("""
+                INSERT INTO appointments (date, time, patient, notes)
+                VALUES (?, ?, ?, ?)
+            """, (appointment_date, appointment_time, patient_name, notes))
+            appointment_id = cursor.lastrowid
+            conn.commit()
+        
+        return f"✓ Appointment created successfully!\n" \
+               f"Appointment ID: {appointment_id}\n" \
+               f"Patient: {patient_name}\n" \
+               f"Date: {appointment_date}\n" \
+               f"Time: {appointment_time}\n" \
+               f"Reason: {reason or 'Not specified'}\n" \
+               f"Doctor: {doctor_name or 'To be assigned'}\n" \
+               f"Status: Scheduled"
+    except ValueError as e:
+        return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
+    except Exception as e:
+        return f"Error creating appointment: {str(e)}"
+
+@function_tool
+def check_availability(appointment_date: str, appointment_time: str, 
+                     doctor_name: Optional[str] = None) -> str:
+    """
+    Check if a time slot is available for booking.
+    
+    Args:
+        appointment_date: Date in format YYYY-MM-DD
+        appointment_time: Time in format HH:MM (24-hour format)
+        doctor_name: Doctor name to check (optional - if provided, checks for that specific doctor)
+    
+    Returns:
+        Availability status message
+    """
+    try:
+        # Validate date format
+        datetime.strptime(appointment_date, "%Y-%m-%d")
+        datetime.strptime(appointment_time, "%H:%M")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Remote schema doesn't have doctor_name or status, so check if time slot is taken
+            cursor.execute("""
+                SELECT id, patient, notes
+                FROM appointments
+                WHERE date = ? 
+                AND time = ?
+            """, (appointment_date, appointment_time))
+            
+            conflicts = cursor.fetchall()
+            
+            if conflicts:
+                conflict = conflicts[0]
+                # Try to extract doctor from notes if provided
+                doctor_info = ""
+                if conflict[2] and doctor_name:
+                    if doctor_name.lower() in conflict[2].lower():
+                        doctor_info = f" for {doctor_name}"
+                elif doctor_name:
+                    doctor_info = f" for {doctor_name}"
+                
+                return f"❌ Time slot {appointment_time} on {appointment_date} is NOT available{doctor_info}.\n" \
+                       f"Already booked: Appointment ID {conflict[0]}, Patient: {conflict[1]}"
+            
+        return f"✓ Time slot {appointment_time} on {appointment_date} is AVAILABLE" + \
+               (f" for {doctor_name}" if doctor_name else "")
+    except ValueError as e:
+        return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
+    except Exception as e:
+        return f"Error checking availability: {str(e)}"
+
+@function_tool
+def list_appointments(patient_name: Optional[str] = None, 
+                     appointment_date: Optional[str] = None) -> str:
+    """
+    List appointments from the database. Can filter by patient name or date.
+    
+    Args:
+        patient_name: Filter by patient name (optional)
+        appointment_date: Filter by date in format YYYY-MM-DD (optional)
+    
+    Returns:
+        Formatted list of appointments
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            if patient_name and appointment_date:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ? AND date = ?
+                    ORDER BY date, time
+                """, (f"%{patient_name}%", appointment_date))
+            elif patient_name:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE patient LIKE ?
+                    ORDER BY date, time
+                """, (f"%{patient_name}%",))
+            elif appointment_date:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    WHERE date = ?
+                    ORDER BY time
+                """, (appointment_date,))
+            else:
+                cursor.execute("""
+                    SELECT id, date, time, patient, notes
+                    FROM appointments
+                    ORDER BY date, time
+                """)
+            
+            appointments = cursor.fetchall()
+        
+        if not appointments:
+            return "No appointments found matching the criteria."
+        
+        result = f"Found {len(appointments)} appointment(s):\n\n"
+        for apt in appointments:
+            # Parse notes to extract reason, doctor, phone
+            notes = apt[4] or ""
+            reason = "Not specified"
+            doctor = "To be assigned"
+            
+            if notes:
+                # Try to parse notes format: "Reason: X | Doctor: Y | Phone: Z"
+                for part in notes.split("|"):
+                    part = part.strip()
+                    if part.startswith("Reason:"):
+                        reason = part.replace("Reason:", "").strip()
+                    elif part.startswith("Doctor:"):
+                        doctor = part.replace("Doctor:", "").strip()
+            
+            result += f"ID: {apt[0]}\n"
+            result += f"Patient: {apt[3]}\n"
+            result += f"Date: {apt[1]}\n"
+            result += f"Time: {apt[2]}\n"
+            result += f"Reason: {reason}\n"
+            result += f"Doctor: {doctor}\n"
+            result += "-" * 40 + "\n"
+        
+        return result
+    except Exception as e:
+        return f"Error listing appointments: {str(e)}"
+
+@function_tool
+def cancel_appointment(appointment_id: int) -> str:
+    """
+    Cancel an appointment by ID.
+    
+    Args:
+        appointment_id: The ID of the appointment to cancel
+    
+    Returns:
+        Confirmation message
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Remote schema doesn't have status field, so delete the appointment
+            cursor.execute("""
+                DELETE FROM appointments 
+                WHERE id = ?
+            """, (appointment_id,))
+            
+            if cursor.rowcount == 0:
+                return f"Appointment ID {appointment_id} not found."
+            
+            conn.commit()
+            return f"✓ Appointment ID {appointment_id} has been cancelled."
+    except Exception as e:
+        return f"Error cancelling appointment: {str(e)}"
+
+@function_tool
+def edit_appointment(patient_name: str, current_appointment_date: str, current_appointment_time: str,
+                    new_appointment_date: Optional[str] = None, 
+                    new_appointment_time: Optional[str] = None) -> str:
+    """
+    Edit the date and/or time of an appointment based on patient name and current appointment date/time.
+    
+    Args:
+        patient_name: Full name of the patient
+        current_appointment_date: Current appointment date in format YYYY-MM-DD
+        current_appointment_time: Current appointment time in format HH:MM (24-hour format)
+        new_appointment_date: New appointment date in format YYYY-MM-DD (optional - if not provided, date remains unchanged)
+        new_appointment_time: New appointment time in format HH:MM (optional - if not provided, time remains unchanged)
+    
+    Returns:
+        Confirmation message with updated appointment details, or error if appointment not found or conflict exists
+    """
+    try:
+        # Validate current date/time format
+        datetime.strptime(current_appointment_date, "%Y-%m-%d")
+        datetime.strptime(current_appointment_time, "%H:%M")
+        
+        # At least one of new date or time must be provided
+        if not new_appointment_date and not new_appointment_time:
+            return "Error: At least one of new_appointment_date or new_appointment_time must be provided."
+        
+        # Validate new date/time formats if provided
+        if new_appointment_date:
+            datetime.strptime(new_appointment_date, "%Y-%m-%d")
+        if new_appointment_time:
+            datetime.strptime(new_appointment_time, "%H:%M")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Find the appointment by patient name and current date/time (remote schema)
+            cursor.execute("""
+                SELECT id, date, time, patient, notes
+                FROM appointments
+                WHERE patient = ?
+                AND date = ?
+                AND time = ?
+            """, (patient_name, current_appointment_date, current_appointment_time))
+            
+            appointment = cursor.fetchone()
+            
+            if not appointment:
+                return f"❌ Appointment not found for {patient_name} on {current_appointment_date} at {current_appointment_time}.\n" \
+                       f"Please verify the patient name, date, and time are correct."
+            
+            appointment_id, apt_date, apt_time, apt_patient, apt_notes = appointment
+            
+            # Parse notes to extract reason and doctor
+            reason = "Not specified"
+            doctor = "To be assigned"
+            if apt_notes:
+                for part in apt_notes.split("|"):
+                    part = part.strip()
+                    if part.startswith("Reason:"):
+                        reason = part.replace("Reason:", "").strip()
+                    elif part.startswith("Doctor:"):
+                        doctor = part.replace("Doctor:", "").strip()
+            
+            # Determine the new date and time values
+            final_date = new_appointment_date if new_appointment_date else apt_date
+            final_time = new_appointment_time if new_appointment_time else apt_time
+            
+            # If date/time hasn't changed, no need to check conflicts
+            if final_date == apt_date and final_time == apt_time:
+                return f"✓ Appointment details unchanged. No update needed.\n" \
+                       f"Appointment ID: {appointment_id}\n" \
+                       f"Patient: {apt_patient}\n" \
+                       f"Date: {apt_date}\n" \
+                       f"Time: {apt_time}"
+            
+            # Check for conflicts at the new time slot
+            cursor.execute("""
+                SELECT id, patient
+                FROM appointments
+                WHERE date = ? 
+                AND time = ?
+                AND id != ?
+            """, (final_date, final_time, appointment_id))
+            
+            conflicting_appointments = cursor.fetchall()
+            
+            if conflicting_appointments:
+                conflict = conflicting_appointments[0]
+                return f"❌ Appointment conflict detected!\n" \
+                       f"The time slot {final_time} on {final_date} is already booked " \
+                       f"(Appointment ID: {conflict[0]}, Patient: {conflict[1]}).\n" \
+                       f"Please choose a different time or date."
+            
+            # Also check if the same patient already has another appointment at the new time
+            cursor.execute("""
+                SELECT id, date, time
+                FROM appointments
+                WHERE patient = ?
+                AND date = ?
+                AND time = ?
+                AND id != ?
+            """, (patient_name, final_date, final_time, appointment_id))
+            
+            existing_patient_appt = cursor.fetchone()
+            if existing_patient_appt:
+                return f"❌ Patient {patient_name} already has another appointment scheduled " \
+                       f"for {final_time} on {final_date} (Appointment ID: {existing_patient_appt[0]}).\n" \
+                       f"Please choose a different time or date."
+            
+            # No conflicts, proceed with update (remote schema)
+            cursor.execute("""
+                UPDATE appointments 
+                SET date = ?, time = ?
+                WHERE id = ?
+            """, (final_date, final_time, appointment_id))
+            
+            conn.commit()
+            
+            changes = []
+            if new_appointment_date:
+                changes.append(f"Date: {apt_date} → {final_date}")
+            if new_appointment_time:
+                changes.append(f"Time: {apt_time} → {final_time}")
+            
+            return f"✓ Appointment updated successfully!\n" \
+                   f"Appointment ID: {appointment_id}\n" \
+                   f"Patient: {apt_patient}\n" \
+                   f"Changes: {', '.join(changes)}\n" \
+                   f"New Date: {final_date}\n" \
+                   f"New Time: {final_time}\n" \
+                   f"Reason: {reason}\n" \
+                   f"Doctor: {doctor}"
+    except ValueError as e:
+        return f"Error: Invalid date or time format. Please use YYYY-MM-DD for date and HH:MM for time. {str(e)}"
+    except Exception as e:
+        return f"Error editing appointment: {str(e)}"
+
+# ============================================================================
+# AGENTS
+# ============================================================================
+
+# Receptionist Agent - Answers questions about the clinic
+receptionist = Agent(
+    name="receptionist",
+    instructions="""
+You are a friendly and knowledgeable receptionist at GreenOak Family Practice clinic.
+Your role is to answer patient questions about the clinic using the clinic information system.
+
+You have access to query_clinic_info tool to retrieve accurate information about:
+- Clinic services and procedures
+- Staff members and their roles
+- Appointment types and scheduling
+- Preventive care and screening services
+- Chronic disease management
+- Administrative services
+
+CRITICAL: When patients ask questions about the clinic, services, staff, or procedures, 
+ALWAYS use the query_clinic_info tool to get accurate, up-to-date information from the 
+clinic's knowledge base. Do NOT rely solely on your training data.
+
+IMPORTANT - VERBAL RESPONSE GUIDELINES:
+Your responses will be spoken aloud by a robot, so follow these rules:
+1. Keep responses concise and conversational, ideally 2-3 sentences maximum
+2. DO NOT use emojis, bullet points, or special formatting
+3. DO NOT use symbols like asterisks, dashes for lists, or markdown formatting
+4. Speak naturally as if talking face-to-face with the patient
+5. Avoid reading out long lists - summarize instead
+6. Use simple, clear language that sounds natural when spoken
+7. For example, say "We're open Monday through Friday from 8 AM to 6 PM" instead of listing each day separately
+
+Be warm, professional, and helpful. If you don't know something, use the tool to find out.
+""",
+    model="gpt-4o-mini",
+    tools=[query_clinic_info]
+)
+
+# Appointment Manager Agent - Handles appointments
+appointment_manager = Agent(
+    name="appointment_manager",
+    instructions="""
+You are an appointment manager at GreenOak Family Practice clinic.
+Your role is to help patients schedule, view, and manage appointments.
+
+You have access to these tools:
+- check_availability: To check if a time slot is available before booking
+- create_appointment: To schedule new appointments (will automatically check for conflicts)
+- list_appointments: To view existing appointments
+- edit_appointment: To edit the date and/or time of existing appointments
+- cancel_appointment: To cancel appointments
+- query_clinic_info: To answer questions about clinic services
+
+When scheduling appointments:
+1. If a patient requests a specific time, you may use check_availability first to verify it's free
+2. Collect all necessary information: patient name, preferred date and time, reason for visit, doctor preference
+3. Use create_appointment tool with the information - it will automatically prevent double-booking
+4. If there's a conflict, the system will inform you - suggest alternative times
+5. Confirm the appointment details with the patient
+
+IMPORTANT: The system prevents double-booking. If a time slot is already taken by the same doctor, 
+the create_appointment tool will return an error. In that case, suggest alternative times or ask 
+the patient if they're flexible with the doctor.
+
+When patients want to view appointments:
+1. Ask for their name or appointment date if needed
+2. Use list_appointments tool
+3. Present the information clearly
+
+When patients want to edit/reschedule appointments:
+1. Ask for their name and current appointment date and time
+2. Ask what new date and/or time they prefer
+3. Use edit_appointment tool with patient name, current date/time, and new date/time
+4. The tool will check for conflicts automatically
+5. Confirm the updated appointment details with the patient
+
+When patients want to cancel:
+1. Ask for the appointment ID
+2. Use cancel_appointment tool
+3. Confirm the cancellation
+
+IMPORTANT - VERBAL RESPONSE GUIDELINES:
+Your responses will be spoken aloud by a robot, so follow these rules:
+1. Keep responses concise and conversational, ideally 2-4 sentences maximum
+2. DO NOT use emojis, bullet points, checkmarks, or special formatting
+3. DO NOT use symbols like asterisks, dashes for lists, or markdown formatting
+4. Speak naturally as if talking face-to-face with the patient
+5. When confirming appointments, speak the date and time naturally, for example say "December 5th at 2 PM" not "2024-12-05 at 14:00"
+6. Avoid reading out appointment IDs unless absolutely necessary
+7. Summarize appointment details conversationally instead of listing them
+8. For example, say "I've booked your appointment with Doctor Carter for tomorrow at 3 PM" instead of a formatted list
+
+Be professional, efficient, and helpful. Always confirm appointment details clearly but conversationally.
+""",
+    model="gpt-4o-mini",
+    tools=[check_availability, create_appointment, list_appointments, edit_appointment, cancel_appointment, query_clinic_info]
+)
+
+# Orchestrator Agent
+orchestrator = Agent(
+    name="orchestrator",
+    instructions="""
+You are the orchestrator for GreenOak Family Practice's patient communication system.
+Your role is to automatically route patient requests to the appropriate specialized agent.
+
+You have access to two specialized agents via handoffs:
+1. receptionist: For answering questions about the clinic, services, staff, procedures, 
+   hours, policies, etc. Use when patients ask informational questions about the clinic.
+
+2. appointment_manager: For appointment-related tasks - scheduling, viewing, modifying, 
+   or cancelling appointments. Use when patients want to book, check, or manage appointments.
+
+Use your judgment to determine which agent is most appropriate for each patient request.
+Consider the context of the conversation and what the patient is trying to accomplish.
+Always handoff to the appropriate agent - don't try to answer questions yourself.
+
+If a request involves both information and appointment booking, start with the receptionist 
+for information, then handoff to appointment_manager for scheduling.
+
+IMPORTANT - VERBAL RESPONSE GUIDELINES:
+All responses will be spoken aloud by a robot. Keep any direct responses brief and natural.
+Do not use emojis, bullet points, or special formatting.
+""",
+    model="gpt-4o-mini",
+    handoffs=[receptionist, appointment_manager]
+)
+
+# ============================================================================
+# CLINIC AGENT SYSTEM
+# ============================================================================
+
+class ClinicAgentSystem:
+    """
+    Main system that uses the orchestrator for automatic routing.
+    Integrates with Pepper robot for spoken responses.
+    """
+    
+    def __init__(self, orchestrator: Agent, enable_tts: bool = True):
+        self.orchestrator = orchestrator
+        self.session = None
+        self.enable_tts = enable_tts
+    
+    def chat(self, user_input: str, user_id: str = "default_user", speak: bool = True) -> str:
+        """
+        Main chat interface - automatically routes to the right agent.
+        Optionally sends response to Pepper robot's TTS.
+        
+        Args:
+            user_input: Patient's message
+            user_id: Unique identifier for the patient
+            speak: Whether to send response to Pepper TTS (default: True)
+        
+        Returns:
+            Response from the appropriate agent
+        """
+        # Create or reuse session for conversation history
+        if self.session is None:
+            self.session = SQLiteSession(f"patient_{user_id}")
+        
+        # Run through orchestrator - it will automatically handoff to the right agent
+        result = Runner.run_sync(
+            self.orchestrator,
+            user_input,
+            session=self.session
+        )
+        
+        # Get response from the agent
+        response = result.final_output
+        
+        # Send to Pepper TTS if enabled
+        if self.enable_tts and speak:
+            send_to_pepper_tts(response)
+        
+        # Extract and send summary to tablet
+        summary = extract_summary_from_response(response, user_input)
+        if summary:
+            send_to_pepper_tablet(summary)
+        
+        return response
+    
+    def chat_without_speech(self, user_input: str, user_id: str = "default_user") -> str:
+        """
+        Chat without sending to TTS - useful for testing or text-only interaction.
+        """
+        return self.chat(user_input, user_id, speak=False)
+
+# ============================================================================
+# INTERACTIVE SESSION
+# ============================================================================
+
+def interactive_session(user_id: str = "default_user", enable_tts: bool = True, use_speech_input: bool = True, recording_duration: float = 5.0, use_audio_input: bool = False):
+    """
+    Interactive session for patient communication with speech input support.
+    
+    Args:
+        user_id: Unique identifier for the patient
+        enable_tts: Whether to send responses to Pepper robot TTS (default: True)
+        use_speech_input: Whether to use speech-to-text from Pepper (default: True)
+        recording_duration: Duration for audio recording in seconds (default: 5.0)
+        use_audio_input: Whether to use audio.py's get_user_text() for input (default: False)
+    """
+    print("=" * 80)
+    print("GreenOak Family Practice - Patient Communication System")
+    print("=" * 80)
+    print("\n" + "=" * 80)
+    print("GETTING STARTED")
+    print("=" * 80)
+    print("\nI can help you with:")
+    print("  - Questions about our clinic, services, and staff")
+    print("  - Scheduling, viewing, or cancelling appointments")
+    print("  - Information about our procedures and policies")
+    print("\n" + "=" * 80)
+    if enable_tts:
+        print(f"\nPepper TTS: ENABLED (sending to {PEPPER_MIDDLEWARE_URL})")
+    else:
+        print("\nPepper TTS: DISABLED (text-only mode)")
+    
+    if use_audio_input and AUDIO_MODULE_AVAILABLE:
+        print("\nAudio Input: ENABLED (using audio.py - Push-to-Talk)")
+        print("  - Type text + ENTER to use text input")
+        print("  - Press ENTER to start recording, press ENTER again to stop")
+    elif use_audio_input and not AUDIO_MODULE_AVAILABLE:
+        print("\nAudio Input: DISABLED (audio.py module not available)")
+        print("Falling back to standard input mode")
+        use_audio_input = False
+    elif use_speech_input and PEPPER_AUDIO_AVAILABLE:
+        print("\nSpeech Input: ENABLED (speak to Pepper)")
+        print(f"Recording duration: {recording_duration} seconds")
+    elif use_speech_input and not PEPPER_AUDIO_AVAILABLE:
+        print("\nSpeech Input: DISABLED (pepper-audio module not available)")
+        print("Falling back to text input mode")
+        use_speech_input = False
+    else:
+        print("\nSpeech Input: DISABLED (text input mode)")
+    
+    print("\nCommands (text mode only):")
+    print("  'tts on'      - Enable Pepper speech")
+    print("  'tts off'     - Disable Pepper speech")
+    print("  'speech on'   - Enable speech input")
+    print("  'speech off'  - Disable speech input (use text)")
+    print("  'exit'        - Quit the session")
+    print("\n")
+    
+    # Initialize the system
+    agent_system = ClinicAgentSystem(orchestrator, enable_tts=enable_tts)
+    
+    # Welcome message
+    welcome_msg = "Hello! I'm Pepper, your virtual assistant at GreenOak Family Practice. How can I help you today?"
+    print(f"Pepper: {welcome_msg}\n")
+    if agent_system.enable_tts:
+        send_to_pepper_tts(welcome_msg)
+    
+    while True:
+        try:
+            if use_audio_input and AUDIO_MODULE_AVAILABLE:
+                # Use audio.py's get_user_text() for push-to-talk input
+                user_input = get_user_text(prompt="You: ")
+                
+                if not user_input:
+                    continue
+                
+                print(f"\nYou: {user_input}\n")
+                
+                # Check for exit commands
+                if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
+                    goodbye_msg = "Thank you for contacting GreenOak Family Practice. Have a great day!"
+                    print(f"\nPepper: {goodbye_msg}\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(goodbye_msg)
+                    break
+                
+                # Check for mode switching commands
+                if 'tts on' in user_input.lower():
+                    agent_system.enable_tts = True
+                    msg = "TTS enabled - responses will be spoken by Pepper"
+                    print(f"[{msg}]\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(msg)
+                    continue
+                
+                if 'tts off' in user_input.lower():
+                    agent_system.enable_tts = False
+                    print("[TTS disabled - text-only mode]\n")
+                    continue
+                
+                if 'speech off' in user_input.lower() or 'text mode' in user_input.lower():
+                    use_audio_input = False
+                    msg = "Switching to text input mode"
+                    print(f"[{msg}]\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(msg)
+                    continue
+                
+            elif use_speech_input and PEPPER_AUDIO_AVAILABLE:
+                # Speech input mode
+                print("\n[Press ENTER to start recording, then speak...]")
+                input()  # Wait for user to press ENTER
+                
+                user_input = speech_to_text_from_pepper(duration=recording_duration)
+                
+                if not user_input:
+                    print("\n[Could not transcribe audio. Please try again or type your message.]\n")
+                    continue
+                
+                print(f"\nYou (transcribed): {user_input}\n")
+                
+                # Check for exit commands in transcribed text
+                if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye']:
+                    goodbye_msg = "Thank you for contacting GreenOak Family Practice. Have a great day!"
+                    print(f"\nPepper: {goodbye_msg}\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(goodbye_msg)
+                    break
+                
+                # Check for mode switching commands
+                if 'tts on' in user_input.lower():
+                    agent_system.enable_tts = True
+                    msg = "TTS enabled - responses will be spoken by Pepper"
+                    print(f"[{msg}]\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(msg)
+                    continue
+                
+                if 'tts off' in user_input.lower():
+                    agent_system.enable_tts = False
+                    print("[TTS disabled - text-only mode]\n")
+                    continue
+                
+                if 'speech off' in user_input.lower() or 'text mode' in user_input.lower():
+                    use_speech_input = False
+                    msg = "Switching to text input mode"
+                    print(f"[{msg}]\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(msg)
+                    continue
+                
+            else:
+                # Text input mode
+                user_input = input("You: ").strip()
+                
+                if user_input.lower() in ['exit', 'quit', 'bye']:
+                    goodbye_msg = "Thank you for contacting GreenOak Family Practice. Have a great day!"
+                    print(f"\nPepper: {goodbye_msg}\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(goodbye_msg)
+                    break
+                
+                if user_input.lower() == 'tts on':
+                    agent_system.enable_tts = True
+                    print("[TTS enabled - responses will be spoken by Pepper]\n")
+                    continue
+                
+                if user_input.lower() == 'tts off':
+                    agent_system.enable_tts = False
+                    print("[TTS disabled - text-only mode]\n")
+                    continue
+                
+                if user_input.lower() == 'speech on' and PEPPER_AUDIO_AVAILABLE:
+                    use_speech_input = True
+                    msg = "Switching to speech input mode. Press ENTER to start recording."
+                    print(f"[{msg}]\n")
+                    if agent_system.enable_tts:
+                        send_to_pepper_tts(msg)
+                    continue
+                
+                if user_input.lower() == 'speech off':
+                    use_speech_input = False
+                    print("[Speech input disabled - using text mode]\n")
+                    continue
+                
+                if not user_input:
+                    continue
+            
+            # Process the user input with the agent system
+            response = agent_system.chat(user_input, user_id=user_id)
+            print(f"\nPepper: {response}\n")
+            
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user. Goodbye!")
+            break
+        except Exception as e:
+            print(f"\nError: {e}\n")
+            print("Please try again.\n")
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="GreenOak Family Practice - Pepper Robot Agent System")
+    parser.add_argument("--no-tts", action="store_true", help="Disable Pepper TTS (text-only mode)")
+    parser.add_argument("--no-speech", action="store_true", help="Disable speech input (use text input)")
+    parser.add_argument("--use-audio-input", action="store_true", help="Use audio.py's get_user_text() for push-to-talk input")
+    parser.add_argument("--pepper-url", type=str, default=None, help="Pepper middleware URL (default: http://172.30.36.100:5000)")
+    parser.add_argument("--language", type=str, default=None, help="TTS language (default: English)")
+    parser.add_argument("--user-id", type=str, default="default_user", help="User ID for session")
+    parser.add_argument("--recording-duration", type=float, default=5.0, help="Audio recording duration in seconds (default: 5.0)")
+    args = parser.parse_args()
+    
+    # Override config from command line
+    if args.pepper_url:
+        PEPPER_MIDDLEWARE_URL = args.pepper_url
+    if args.language:
+        TTS_LANGUAGE = args.language
+    
+    # Check for API key
+    if not os.getenv("OPENAI_API_KEY"):
+        print("Warning: OPENAI_API_KEY environment variable not set.")
+        print("Please set it before running:")
+        print("  export OPENAI_API_KEY='your-api-key-here'")
+        print("\nContinuing anyway...\n")
+    
+    # Run interactive session
+    enable_tts = not args.no_tts
+    use_speech_input = not args.no_speech if not args.use_audio_input else False
+    use_audio_input = args.use_audio_input
+    interactive_session(
+        user_id=args.user_id, 
+        enable_tts=enable_tts,
+        use_speech_input=use_speech_input,
+        recording_duration=args.recording_duration,
+        use_audio_input=use_audio_input
+    )
